@@ -3,9 +3,10 @@ from nba_api.stats.static import players
 import pandas as pd
 import requests
 from datetime import datetime, timedelta
+import pytz  # For time zone handling
 
 # --- Constants ---
-ODDS_API_KEY = '06f33a81a9869429c717a7ac27b205ae'
+ODDS_API_KEY = "YOUR_API_KEY"  # Replace with your actual Odds API key
 SPORT = "basketball_nba"
 SEASON = "2024-25"
 
@@ -42,11 +43,24 @@ def calculate_averages(df):
     }
 
 def fetch_nba_games(today=True):
-    """Fetch NBA games for today or tomorrow."""
+    """Fetch NBA games for today or tomorrow based on Eastern Time (ET)."""
+    # Use Eastern Time (ET) since NBA schedules are based on ET
+    eastern = pytz.timezone('US/Eastern')
+    now_eastern = datetime.now(eastern)
+    
+    if today:
+        date_str = now_eastern.strftime("%Y-%m-%d")
+    else:
+        tomorrow_eastern = now_eastern + timedelta(days=1)
+        date_str = tomorrow_eastern.strftime("%Y-%m-%d")
+    
+    # Fetch the game schedule for the 2024-25 season
     game_finder = leaguegamefinder.LeagueGameFinder(league_id_nullable='00', season_nullable=SEASON)
     games_df = game_finder.get_data_frames()[0]
-    date_str = datetime.now().strftime("%Y-%m-%d") if today else (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-    return games_df[games_df['GAME_DATE'] == date_str]['MATCHUP'].tolist()
+    
+    # Filter games for the specified date
+    games_on_date = games_df[games_df['GAME_DATE'] == date_str]['MATCHUP'].tolist()
+    return games_on_date
 
 def fetch_odds(game_matchup):
     """Fetch odds for a specific game from The Odds API."""
