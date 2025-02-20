@@ -14,7 +14,9 @@ def main():
     st.sidebar.header("Game Selection")
     today_or_tomorrow = st.sidebar.radio("Select Day", ["Today", "Tomorrow"])
     games = fetch_nba_games(today=True if today_or_tomorrow == "Today" else False)
-    selected_game = st.sidebar.selectbox("Choose a Game", games) if games else st.sidebar.write("No games found.")
+    if not games:
+        st.sidebar.write(f"No games found for {today_or_tomorrow}. This might be due to an API issue or no scheduled games.")
+    selected_game = st.sidebar.selectbox("Choose a Game", games) if games else None
 
     # Multi-player selection
     st.header("Player Analysis")
