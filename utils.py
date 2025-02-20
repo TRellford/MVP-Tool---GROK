@@ -5,7 +5,7 @@ import requests
 from datetime import datetime, timedelta
 
 # --- Constants ---
-ODDS_API_KEY = "YOUR_API_KEY"  # Replace with your actual Odds API key
+ODDS_API_KEY = 06f33a81a9869429c717a7ac27b205ae
 SPORT = "basketball_nba"
 SEASON = "2024-25"
 
