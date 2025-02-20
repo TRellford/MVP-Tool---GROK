@@ -8,7 +8,7 @@ import pandas as pd
 def get_api_key():
     """Retrieves the API key from Streamlit secrets."""
     try:
-        return st.secrets["ODDS_API_KEY"]
+        return st.secrets["06f33a81a9869429c717a7ac27b205ae"]
     except KeyError:
         st.error("Please add your Odds API key to Streamlit secrets (e.g., in secrets.toml or Streamlit Cloud settings).")
         st.stop()
