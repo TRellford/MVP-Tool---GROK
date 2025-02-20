@@ -1,84 +1,107 @@
-from nba_api.stats.endpoints import playergamelog, leaguegamefinder
-from nba_api.stats.static import players
-import pandas as pd
 import requests
-from datetime import datetime, timedelta
-import pytz  # For time zone handling
+import streamlit as st
 
-# --- Constants ---
-ODDS_API_KEY = "YOUR_API_KEY"  # Replace with your actual Odds API key
-SPORT = "basketball_nba"
-SEASON = "2024-25"
-
-# --- Helper Functions ---
-
-def get_player_id(player_name):
-    """Find a player's ID by their full name."""
-    player_dict = players.find_players_by_full_name(player_name)
-    return player_dict[0]['id'] if player_dict else None
-
-def fetch_game_logs(player_id):
-    """Fetch a player's game logs for the season."""
+def get_api_key():
+    """Retrieve the API key from Streamlit secrets.
+    
+    Raises:
+        KeyError: If the API key is not found in Streamlit secrets.
+    """
     try:
-        game_log = playergamelog.PlayerGameLog(player_id=player_id, season=SEASON)
-        return game_log.get_data_frames()[0]
-    except Exception as e:
-        return None
+        return st.secrets["ODDS_API_KEY"]
+    except KeyError:
+        st.error("Please add your Odds API key to Streamlit secrets (e.g., in secrets.toml or Streamlit Cloud settings).")
+        st.stop()
 
-def get_last_10_games(df):
-    """Filter to the last 10 games from game logs."""
-    if df is None or len(df) == 0:
-        return None
-    return df.head(10) if len(df) >= 10 else df
-
-def calculate_averages(df):
-    """Calculate average stats over the selected games."""
-    if df is None:
-        return None
-    return {
-        'Points': df['PTS'].mean(),
-        'Rebounds': df['REB'].mean(),
-        'Assists': df['AST'].mean(),
-        'Minutes': df['MIN'].mean()
-    }
-
-def fetch_nba_games(today=True):
-    """Fetch NBA games for today or tomorrow based on Eastern Time (ET)."""
-    # Use Eastern Time (ET) since NBA schedules are based on ET
-    eastern = pytz.timezone('US/Eastern')
-    now_eastern = datetime.now(eastern)
+@st.cache_data(ttl=60)  # Cache for 60 seconds to respect API rate limits
+def fetch_games(date):
+    """Fetch NBA games for a given date from The Odds API.
     
-    if today:
-        date_str = now_eastern.strftime("%Y-%m-%d")
-    else:
-        tomorrow_eastern = now_eastern + timedelta(days=1)
-        date_str = tomorrow_eastern.strftime("%Y-%m-%d")
-    
-    # Fetch the game schedule for the 2024-25 season
-    game_finder = leaguegamefinder.LeagueGameFinder(league_id_nullable='00', season_nullable=SEASON)
-    games_df = game_finder.get_data_frames()[0]
-    
-    # Filter games for the specified date
-    games_on_date = games_df[games_df['GAME_DATE'] == date_str]['MATCHUP'].tolist()
-    return games_on_date
-
-def fetch_odds(game_matchup):
-    """Fetch odds for a specific game from The Odds API."""
-    url = f"https://api.the-odds-api.com/v4/sports/{SPORT}/odds/?apiKey={ODDS_API_KEY}®ions=us&markets=h2h,spreads,totals"
+    Args:
+        date (str): The date to fetch games for, either 'today' or 'tomorrow'.
+        
+    Returns:
+        list: A list of game strings in the format 'Home Team vs Away Team'.
+    """
+    api_key = get_api_key()
+    sport = 'basketball_nba'
+    url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds/?apiKey={api_key}®ions=us&markets=h2h"
     response = requests.get(url)
     if response.status_code == 200:
-        odds_data = response.json()
-        for game in odds_data:
-            if game_matchup in f"{game['home_team']} vs. {game['away_team']}" or game_matchup in f"{game['away_team']} @ {game['home_team']}":
-                return game['bookmakers'][0]['markets']  # First bookmaker
-    return None
-
-def calculate_betting_edge(avg_stat, odds_line, odds_price):
-    """Calculate expected value (EV) for a betting line."""
-    if odds_price > 0:
-        implied_prob = 100 / (odds_price + 100)
+        data = response.json()
+        games = [f"{event['home_team']} vs {event['away_team']}" for event in data]
+        return games
     else:
-        implied_prob = -odds_price / (-odds_price + 100)
-    hit_rate = 1 if avg_stat > odds_line else 0  # Simplified hit rate
-    ev = (hit_rate * (odds_price / 100 if odds_price > 0 else 1)) - ((1 - hit_rate) * 1)
-    return ev
+        st.error(f"Failed to fetch games: HTTP {response.status_code}")
+        return []
+
+@st.cache_data(ttl=30)  # Cache for 30 seconds since odds update frequently
+def fetch_odds(game):
+    """Fetch the best available odds for a selected game from The Odds API.
+    
+    Args:
+        game (str): The selected game in the format 'Home Team vs Away Team'.
+        
+    Returns:
+        dict: A dictionary containing the best Moneyline, Spread, and Over/Under odds.
+    """
+    api_key = get_api_key()
+    sport = 'basketball_nba'
+    regions = 'us'
+    markets = 'h2h,spreads,totals'  # Moneyline, Spread, Over/Under
+    url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds/?apiKey={api_key}®ions={regions}&markets={markets}"
+    response = requests.get(url)
+    if response.status_code == 200:
+        data = response.json()
+        for event in data:
+            if f"{event['home_team']} vs {event['away_team']}" == game:
+                bookmakers = event['bookmakers']
+                # Find best Moneyline (highest odds for home team)
+                best_ml = max(bookmakers, key=lambda b: b['markets'][0]['outcomes'][0]['price'])
+                # Find best Spread (lowest point for favorite, assuming home team is favorite if point < 0)
+                best_spread = min(bookmakers, key=lambda b: b['markets'][1]['outcomes'][0]['point'] if b['markets'][1]['outcomes'][0]['name'] == event['home_team'] else float('inf'))
+                # Find best Over/Under (lowest total points)
+                best_ou = min(bookmakers, key=lambda b: b['markets'][2]['outcomes'][0]['point'])
+                return {
+                    'moneyline': {'book': best_ml['title'], 'odds': best_ml['markets'][0]['outcomes'][0]['price']},
+                    'spread': {'book': best_spread['title'], 'point': best_spread['markets'][1]['outcomes'][0]['point'], 'odds': best_spread['markets'][1]['outcomes'][0]['price']},
+                    'over_under': {'book': best_ou['title'], 'total': best_ou['markets'][2]['outcomes'][0]['point'], 'odds': best_ou['markets'][2]['outcomes'][0]['price']}
+                }
+        return {"error": "Game not found in API response"}
+    else:
+        return {"error": f"API request failed with status {response.status_code}"}
+
+@st.cache_data(ttl=30)  # Cache for 30 seconds since props update frequently
+def fetch_player_props(game):
+    """Fetch player props for the selected game from The Odds API.
+    
+    Args:
+        game (str): The selected game in the format 'Home Team vs Away Team'.
+        
+    Returns:
+        list: A list of player prop dictionaries.
+    """
+    api_key = get_api_key()
+    sport = 'basketball_nba'
+    regions = 'us'
+    markets = 'player_points,player_rebounds,player_assists,player_threes'  # Example player prop markets
+    url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds/?apiKey={api_key}®ions={regions}&markets={markets}"
+    response = requests.get(url)
+    if response.status_code == 200:
+        data = response.json()
+        props = []
+        for event in data:
+            if f"{event['home_team']} vs {event['away_team']}" == game:
+                for bookmaker in event['bookmakers']:
+                    for market in bookmaker['markets']:
+                        for outcome in market['outcomes']:
+                            props.append({
+                                'player': outcome['description'],
+                                'prop_type': market['key'].replace('player_', ''),  # e.g., 'points'
+                                'value': outcome.get('point', 'N/A'),  # Some props may not have a point value
+                                'odds': outcome['price'],
+                                'bookmaker': bookmaker['title']
+                            })
+        return props if props else [{"error": "No player props available for this game"}]
+    else:
+        return [{"error": f"API request failed with status {response.status_code}"}]
