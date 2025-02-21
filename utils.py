@@ -34,34 +34,53 @@ def get_games_by_date(date_str):
         return []
 
 @st.cache_data(ttl=3600)  # Cache for 1 hour
+
+import streamlit as st
+import requests
+
 def find_player_games(player_name):
-    player_data = requests.get(f"{BALL_DONT_LIE_BASE_URL}/players?search={player_name}").json()
-    if not player_data['data']:
-        return []
+    url = f"{BALL_DONT_LIE_BASE_URL}/players?search={player_name}"
     
-    player_team = player_data['data'][0]['team']['full_name']
-    
-    url = f"{BASE_URL}/odds?apiKey={API_KEY}&regions=us&markets=h2h&oddsFormat=american"
     try:
+        response = requests.get(url)
+
+        # Debugging: Show full response if it fails
+        if response.status_code != 200:
+            st.error(f"Error fetching player data: {response.status_code} - {response.text}")
+            return []
+        
+        data = response.json()
+
+        # Debugging: Check if data contains players
+        if "data" not in data or not data["data"]:
+            st.error(f"No players found for: {player_name}")
+            return []
+
+        player_team = data["data"][0]["team"]["full_name"]
+
+        url = f"{BASE_URL}/odds?apiKey={API_KEY}&regions=us&markets=h2h&oddsFormat=american"
         response = requests.get(url)
         response.raise_for_status()
         games = response.json()
         
-        player_games = [
+        return [
             {
-                'id': game['id'],
-                'home_team': game['home_team'],
-                'away_team': game['away_team'],
-                'commence_time': game['commence_time'],
-                'bookmakers': game['bookmakers']
+                "id": game["id"],
+                "home_team": game["home_team"],
+                "away_team": game["away_team"],
+                "commence_time": game["commence_time"],
+                "bookmakers": game["bookmakers"]
             }
-            for game in games
-            if player_team in [game['home_team'], game['away_team']]
+            for game in games if player_team in [game["home_team"], game["away_team"]]
         ]
-        return player_games
+    
     except requests.exceptions.RequestException as e:
-        st.error(f"Error fetching player games: {e}")
+        st.error(f"Request failed: {e}")
         return []
+    except ValueError:
+        st.error("Invalid response format (not JSON)")
+        return []
+
 
 def is_player_in_game(player_name, game):
     return player_name.split()[-1] in game['home_team'] or player_name.split()[-1] in game['away_team']
