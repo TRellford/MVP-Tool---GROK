@@ -39,57 +39,66 @@ def get_games_by_date(date_str):
         return []
 
 @st.cache_data(ttl=3600)  # Cache for 1 hour
+import requests
+import streamlit as st
+
+BALL_DONT_LIE_BASE_URL = "https://www.balldontlie.io/api/v1"
+
+@st.cache_data(ttl=3600)  # Cache for 1 hour
 def find_player_games(player_name):
     """Find upcoming games for a player based on their team."""
+    
     url = f"{BALL_DONT_LIE_BASE_URL}/players?search={player_name}"
-
+    
     try:
         response = requests.get(url)
+        st.write(f"🔍 API Response Status: {response.status_code}")  # Debugging
 
-        # 🔥 Debugging: Print the raw response
-        st.write(f"🔍 API Response Status: {response.status_code}")
-        st.write("📄 Raw Response Content:")
-        st.code(response.text)
-
-        # Check for errors
         if response.status_code != 200:
-            st.error(f"🚨 API Error: {response.status_code} - {response.text}")
+            st.error(f"🚨 API Error: {response.status_code}")
+            st.write(response.text)  # Print response for debugging
             return []
-
-        # Attempt to parse JSON
-        try:
-            data = response.json()
-        except requests.exceptions.JSONDecodeError:
-            st.error("⚠️ API did not return valid JSON. Raw response displayed above.")
-            return []
-
-        # Ensure the response contains player data
+        
+        data = response.json()
+        
         if "data" not in data or not data["data"]:
             st.error(f"❌ No players found for: {player_name}")
             return []
 
-        player_team = data["data"][0]["team"]["full_name"]
+        # Extract player's team
+        player_info = data["data"][0]
+        player_team = player_info.get("team", {}).get("full_name", "Unknown Team")
 
-        # Now fetch games
-        url = f"{BASE_URL}/odds?apiKey={API_KEY}&regions=us&markets=h2h&oddsFormat=american"
-        response = requests.get(url)
-        response.raise_for_status()
-        games = response.json()
+        st.write(f"✅ Found Player: {player_info['first_name']} {player_info['last_name']}, Team: {player_team}")
 
-        return [
+        # Now fetch NBA games
+        games_url = f"https://www.balldontlie.io/api/v1/games"
+        games_response = requests.get(games_url)
+        
+        if games_response.status_code != 200:
+            st.error(f"🚨 Error fetching NBA games: {games_response.status_code}")
+            return []
+
+        games = games_response.json().get("data", [])
+
+        # Filter games where the player's team is playing
+        player_games = [
             {
                 "id": game["id"],
-                "home_team": game["home_team"],
-                "away_team": game["away_team"],
-                "commence_time": game["commence_time"],
-                "bookmakers": game["bookmakers"]
+                "home_team": game["home_team"]["full_name"],
+                "away_team": game["visitor_team"]["full_name"],
+                "commence_time": game["date"]
             }
-            for game in games if player_team in [game["home_team"], game["away_team"]]
+            for game in games
+            if player_team in [game["home_team"]["full_name"], game["visitor_team"]["full_name"]]
         ]
-    
+
+        return player_games
+
     except requests.exceptions.RequestException as e:
         st.error(f"❌ Request failed: {e}")
         return []
+
 
 def get_player_prop_odds(game_id, prop):
     """Fetch player prop odds from The Odds API."""
