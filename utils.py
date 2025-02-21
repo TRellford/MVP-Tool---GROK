@@ -42,26 +42,40 @@ def get_games_by_date(date_str):
 def find_player_games(player_name):
     """Find upcoming games for a player based on their team."""
     url = f"{BALL_DONT_LIE_BASE_URL}/players?search={player_name}"
-    
+
     try:
         response = requests.get(url)
-        
+
+        # 🔥 Debugging: Print the raw response
+        st.write(f"🔍 API Response Status: {response.status_code}")
+        st.write("📄 Raw Response Content:")
+        st.code(response.text)
+
+        # Check for errors
         if response.status_code != 200:
-            st.error(f"Error fetching player data: {response.status_code} - {response.text}")
+            st.error(f"🚨 API Error: {response.status_code} - {response.text}")
             return []
-        
-        data = response.json()
+
+        # Attempt to parse JSON
+        try:
+            data = response.json()
+        except requests.exceptions.JSONDecodeError:
+            st.error("⚠️ API did not return valid JSON. Raw response displayed above.")
+            return []
+
+        # Ensure the response contains player data
         if "data" not in data or not data["data"]:
-            st.error(f"No players found for: {player_name}")
+            st.error(f"❌ No players found for: {player_name}")
             return []
-        
+
         player_team = data["data"][0]["team"]["full_name"]
 
+        # Now fetch games
         url = f"{BASE_URL}/odds?apiKey={API_KEY}&regions=us&markets=h2h&oddsFormat=american"
         response = requests.get(url)
         response.raise_for_status()
         games = response.json()
-        
+
         return [
             {
                 "id": game["id"],
@@ -74,10 +88,7 @@ def find_player_games(player_name):
         ]
     
     except requests.exceptions.RequestException as e:
-        st.error(f"Request failed: {e}")
-        return []
-    except ValueError:
-        st.error("Invalid response format (not JSON)")
+        st.error(f"❌ Request failed: {e}")
         return []
 
 def get_player_prop_odds(game_id, prop):
