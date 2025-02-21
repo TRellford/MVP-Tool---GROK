@@ -39,12 +39,7 @@ def get_games_by_date(date_str):
         return []
 
 @st.cache_data(ttl=3600)  # Cache for 1 hour
-import requests
-import streamlit as st
 
-BALL_DONT_LIE_BASE_URL = "https://www.balldontlie.io/api/v1"
-
-@st.cache_data(ttl=3600)  # Cache for 1 hour
 def find_player_games(player_name):
     """Find upcoming games for a player based on their team."""
     
