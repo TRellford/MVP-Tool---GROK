@@ -1,7 +1,28 @@
 import streamlit as st
 import utils
+import requests
 
 st.title("NBA Betting Prediction System")
+
+BALL_DONT_LIE_BASE_URL = "https://www.balldontlie.io/api/v1"
+
+player_name = st.text_input("Enter player name to test API")
+
+if st.button("Test API"):
+    url = f"{BALL_DONT_LIE_BASE_URL}/players?search={player_name}"
+    response = requests.get(url)
+    
+    st.write(f"Status Code: {response.status_code}")
+    st.write("Raw Response:")
+    st.code(response.text)
+
+    try:
+        data = response.json()
+        st.write("JSON Response:")
+        st.json(data)
+    except:
+        st.error("Response is not valid JSON!")
+
 
 def player_search():
     st.subheader("Player Prop Search")
