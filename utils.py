@@ -3,7 +3,7 @@ from scipy.stats import norm
 from datetime import datetime
 import json
 
-API_KEY = "YOUR_API_KEY"  # Replace with your actual API key
+API_KEY = "65b095b96394ef02bceb798783f40c90"  # Replace with your actual API key
 BASE_URL = "https://api.the-odds-api.com/v4/sports/basketball_nba"
 CACHE_FILE = "nba_cache.json"
 game_cache = {}
