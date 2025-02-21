@@ -14,22 +14,17 @@ BALL_DONT_LIE_BASE_URL = "https://www.balldontlie.io/api/v1"
 
 @st.cache_data(ttl=3600)  # Cache for 1 hour
 def get_games_by_date(date_str):
-
-    """
-    Fetch NBA games for a specific date from The Odds API.
-    
-    Args:
-        date_str (str): Date in YYYY-MM-DD format.
-    
-    Returns:
-        list: List of games with relevant details.
-    """
     url = f"{BASE_URL}/odds?apiKey={API_KEY}&regions=us&markets=h2h,spreads,totals&oddsFormat=american&date={date_str}T00:00:00Z"
     try:
-        response = requests.get(url)
-        response.raise_for_status()
+        with st.spinner("Fetching games..."):
+            response = requests.get(url)
+            response.raise_for_status()
         games = response.json()
-        return [
+        return games
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error fetching games: {e}")
+        return []
+
             {
                 'id': game['id'],
                 'home_team': game['home_team'],
@@ -44,34 +39,34 @@ def get_games_by_date(date_str):
 
 @st.cache(ttl=3600)  # Cache for 1 hour
 def find_player_games(player_name):
-    """
-    Find upcoming games for a player based on team schedules from The Odds API.
+    player_data = requests.get(f"{BALL_DONT_LIE_BASE_URL}/players?search={player_name}").json()
+    if not player_data['data']:
+        return []
     
-    Args:
-        player_name (str): Name of the player.
+    player_team = player_data['data'][0]['team']['full_name']
     
-    Returns:
-        list: List of games involving the player's team.
-    """
     url = f"{BASE_URL}/odds?apiKey={API_KEY}&regions=us&markets=h2h&oddsFormat=american"
     try:
         response = requests.get(url)
         response.raise_for_status()
         games = response.json()
-        player_games = []
-        for game in games:
-            if player_name.split()[-1] in game['home_team'] or player_name.split()[-1] in game['away_team']:
-                player_games.append({
-                    'id': game['id'],
-                    'home_team': game['home_team'],
-                    'away_team': game['away_team'],
-                    'commence_time': game['commence_time'],
-                    'bookmakers': game['bookmakers']
-                })
+        
+        player_games = [
+            {
+                'id': game['id'],
+                'home_team': game['home_team'],
+                'away_team': game['away_team'],
+                'commence_time': game['commence_time'],
+                'bookmakers': game['bookmakers']
+            }
+            for game in games
+            if player_team in [game['home_team'], game['away_team']]
+        ]
         return player_games
     except requests.exceptions.RequestException as e:
-        print(f"Error fetching player games: {e}")
+        st.error(f"Error fetching player games: {e}")
         return []
+
 
 def is_player_in_game(player_name, game):
     """
@@ -113,30 +108,23 @@ def get_player_prop_odds(game_id, prop):
 
 @st.cache(ttl=3600)  # Cache for 1 hour
 def get_player_stats(player_name, trend_period=5):
-    """
-    Fetch player stats from Ball Don't Lie API.
-    
-    Args:
-        player_name (str): Name of the player.
-        trend_period (int): Number of recent games to fetch (default: 5).
-    
-    Returns:
-        list or None: List of recent stats if available, None otherwise.
-    """
-    # Get player ID
     player_response = requests.get(f"{BALL_DONT_LIE_BASE_URL}/players?search={player_name}")
     if player_response.status_code != 200 or not player_response.json()['data']:
+        st.error("Player not found.")
         return None
+    
     player_id = player_response.json()['data'][0]['id']
     
-    # Get recent stats
     stats_response = requests.get(
         f"{BALL_DONT_LIE_BASE_URL}/stats?player_ids[]={player_id}&per_page={trend_period}"
     )
+    
     if stats_response.status_code != 200:
+        st.error("Failed to fetch player stats.")
         return None
-    stats = stats_response.json()['data']
-    return stats
+    
+    return stats_response.json()['data']
+
 
 def predict_player_prop(player_name, prop, prop_line, game, trend_period=5):
     """
@@ -268,24 +256,14 @@ def odds_to_implied_prob(odds):
     return -odds / (-odds + 100)
 
 def get_risk_level(odds):
-    """
-    Determine risk level based on odds.
-    
-    Args:
-        odds (int): Odds value.
-    
-    Returns:
-        str: Risk level indicator.
-    """
     if odds <= -200:
         return "🟢 Safe (-300 to -200)"
-    elif odds <= -180:
-        return "🟡 Moderate (-180 to +100)"
+    elif -200 < odds <= -100:
+        return "🟡 Moderate (-200 to -100)"
+    elif -99 <= odds <= +100:
+        return "🟠 High Risk (-99 to +100)"
     elif odds >= 251:
         return "🔴 Very High Risk (+251 or above)"
-    return "🟡 Moderate (-180 to +100)"
+    return "🟡 Moderate"
 
-# Example usage (remove in production)
-if __name__ == "__main__":
-    st.write("Utils module for NBA betting prediction system")
-​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​
+
