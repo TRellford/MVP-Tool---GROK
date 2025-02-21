@@ -12,8 +12,9 @@ if not API_KEY:
 BASE_URL = "https://api.the-odds-api.com/v4/sports/basketball_nba"
 BALL_DONT_LIE_BASE_URL = "https://www.balldontlie.io/api/v1"
 
-@st.cache(ttl=3600)  # Cache for 1 hour
+@st.cache_data(ttl=3600)  # Cache for 1 hour
 def get_games_by_date(date_str):
+
     """
     Fetch NBA games for a specific date from The Odds API.
     
