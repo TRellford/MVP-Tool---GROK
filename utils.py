@@ -25,7 +25,7 @@ def get_games_by_date(date_str):
         st.error(f"Error fetching games: {e}")
         return []
 
-            {
+        {
                 'id': game['id'],
                 'home_team': game['home_team'],
                 'away_team': game['away_team'],
