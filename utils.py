@@ -115,3 +115,23 @@ def fetch_best_props(player_name, trend_length):
         "weak_defensive_teams": weakest_teams.get(best_prop[0].lower(), [])
     }
 
+def fetch_game_predictions(game_selection):
+    """Fetches AI-generated Moneyline, Spread, and Over/Under predictions for a selected game."""
+    
+    if not game_selection or "vs" not in game_selection:
+        return {"error": "Invalid game selection. Please select a valid game."}
+
+    home_team, away_team = game_selection.split(" vs ")
+
+    # Example AI-generated predictions (Replace with real model later)
+    predictions = {
+        "Game": f"{home_team} vs {away_team}",
+        "Moneyline": f"{home_team} to win (Win Probability: 55%)",
+        "Spread": f"{home_team} -3.5 (-110)",
+        "Over/Under": f"Over 225.5 (-108)",
+        "Edge Detector": "🔥 AI Model suggests home team should be -5.0 favorites, creating a 1.5-point edge."
+    }
+    
+    return predictions
+
+
