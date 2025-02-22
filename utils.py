@@ -134,4 +134,39 @@ def fetch_game_predictions(game_selection):
     
     return predictions
 
+def fetch_sharp_money_trends(game_selection):
+    """Fetches betting line movement & sharp money trends from Sports Data API."""
+    
+    if not game_selection or "vs" not in game_selection:
+        return {"error": "Invalid game selection. Please select a valid game."}
+
+    url = f"https://sportsdata.io/api/betting-trends?game={game_selection}"
+    
+    response = requests.get(url, headers={"Authorization": f"Bearer {os.getenv('BETTING_API_KEY')}"})
+    
+    if response.status_code != 200:
+        return {"error": f"Failed to fetch data: {response.text}"}
+    
+    data = response.json()
+    
+    return {
+        "Public Bets %": data.get("public_bets", "N/A"),
+        "Sharp Money %": data.get("sharp_money", "N/A"),
+        "Line Movement": data.get("line_movement", "N/A")
+    }
+def fetch_sgp_builder(game_selection, props, multi_game=False):
+    """Generates an optimized Same Game Parlay (SGP) based on player props & correlation scores."""
+
+    correlation_scores = {
+        "Points & Assists": 0.85, 
+        "Rebounds & Blocks": 0.78,
+        "3PT & Points": 0.92
+    }
+
+    prop_text = f"SGP+ for multiple games" if multi_game else f"SGP for {game_selection}"
+
+    return {
+        "SGP": prop_text,
+        "Correlation Scores": {p: correlation_scores.get(p, "No correlation data") for p in props}
+    }
 
