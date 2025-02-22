@@ -1,8 +1,8 @@
 import streamlit as st
 import datetime
-import matplotlib.pyplot as plt
 import pandas as pd
-
+import matplotlib.pyplot as plt
+from datetime import timedelta
 from utils import (
     get_games_by_date, fetch_player_data, fetch_best_props, 
     fetch_game_predictions, fetch_sgp_builder, fetch_sharp_money_trends
@@ -13,6 +13,13 @@ st.set_page_config(page_title="NBA Betting AI", layout="wide")
 # --- Sidebar Navigation (Only Dropdown Menu) ---
 st.sidebar.title("🔍 Navigation")
 menu_option = st.sidebar.selectbox("Select a Section:", ["Player Search", "SGP", "SGP+", "Game Predictions"])
+
+# --- Get Current and Next Day's Games ---
+today = datetime.datetime.today().date()
+tomorrow = today + timedelta(days=1)
+
+todays_games = get_games_by_date(today)
+tomorrows_games = get_games_by_date(tomorrow)
 
 # --- Section 1: Player Search ---
 if menu_option == "Player Search":
@@ -38,20 +45,25 @@ if menu_option == "Player Search":
                 st.error(stats_df["error"])
             else:
                 st.write(f"📊 **Stats for {player_name}:**")
-                
+
                 if "All" in selected_props:
                     selected_props = ["Points", "Rebounds", "Assists", "3PT Made", "Blocks", "Steals"]
 
-                # 📊 Display Table of Averages
+                # 📊 Ensure Dates Are Sorted Correctly
+                stats_df["Game Date"] = pd.to_datetime(stats_df["Game Date"])
+                stats_df = stats_df.sort_values(by="Game Date", ascending=False)  # Sort by recent games
+                stats_df["Game Date"] = stats_df["Game Date"].dt.strftime("%b %d")  # Convert to 'Feb 22' format
+
+                # 📊 Table of Averages for Selected Props
                 st.subheader("📊 Average Stats Over Selected Games")
                 prop_averages = {}
 
                 for prop in selected_props:
                     if prop in stats_df.columns:
                         prop_averages[prop] = {
-                            "Last 5 Games": round(stats_df[prop].head(5).mean(), 1),
-                            "Last 10 Games": round(stats_df[prop].head(10).mean(), 1),
-                            "Last 15 Games": round(stats_df[prop].head(15).mean(), 1)
+                            "Last 5 Games": round(stats_df[prop].iloc[:5].mean(), 1),
+                            "Last 10 Games": round(stats_df[prop].iloc[:10].mean(), 1),
+                            "Last 15 Games": round(stats_df[prop].iloc[:15].mean(), 1)
                         }
 
                 # Convert to DataFrame & Display
@@ -60,11 +72,6 @@ if menu_option == "Player Search":
                     st.dataframe(avg_df.style.format("{:.1f}"))
 
                 # 📊 Generate Graphs for Each Selected Prop
-                import matplotlib.pyplot as plt
-
-                # Convert Date Format for Readability
-                stats_df["Game Date"] = pd.to_datetime(stats_df["Game Date"]).dt.strftime("%b %d")
-
                 for prop in selected_props:
                     if prop in stats_df.columns:
                         st.subheader(f"📊 {prop} - Last {trend_length} Games")
@@ -84,13 +91,12 @@ if menu_option == "Player Search":
                         # Display Graph
                         st.pyplot(fig)
 
-
 # --- Section 2: SGP (Same Game Parlay - Only 1 Game Allowed) ---
 elif menu_option == "SGP":
     st.header("🎯 Same Game Parlay (SGP) - One Game Only")
     
     selected_date = st.radio("Choose Game Date:", ["Today's Games", "Tomorrow's Games"], key="sgp_date")
-    available_games = get_games_by_date(datetime.datetime.today() if selected_date == "Today's Games" else datetime.datetime.today() + datetime.timedelta(days=1))
+    available_games = todays_games if selected_date == "Today's Games" else tomorrows_games
     
     selected_game = st.selectbox("Select a Game:", available_games, key="sgp_game")
     
@@ -104,7 +110,7 @@ elif menu_option == "SGP":
 elif menu_option == "SGP+":
     st.header("🔥 Multi-Game Parlay (SGP+) - Select 2 to 12 Games")
     
-    selected_games = st.multiselect("Select Games (Min: 2, Max: 12):", get_games_by_date(datetime.datetime.today()) + get_games_by_date(datetime.datetime.today() + datetime.timedelta(days=1)))
+    selected_games = st.multiselect("Select Games (Min: 2, Max: 12):", todays_games + tomorrows_games)
 
     if len(selected_games) < 2:
         st.warning("⚠️ You must select at least 2 games.")
@@ -126,7 +132,7 @@ elif menu_option == "SGP+":
 elif menu_option == "Game Predictions":
     st.header("📈 Moneyline, Spread & Over/Under Predictions")
     
-    selected_games = st.multiselect("Select Games for Predictions:", get_games_by_date(datetime.datetime.today()) + get_games_by_date(datetime.datetime.today() + datetime.timedelta(days=1)))
+    selected_games = st.multiselect("Select Games for Predictions:", todays_games + tomorrows_games)
     
     if len(selected_games) == 0:
         st.warning("⚠️ Please select at least one game.")
