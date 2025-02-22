@@ -37,22 +37,19 @@ if st.button("🔍 Fetch Player Info"):
     player_data = utils.fetch_player_metadata(player_name)
     st.write(player_data)
 
-    # Fetch Player Game Logs
+    # ✅ Use the Correct Function from utils.py
     player_stats = utils.fetch_player_game_logs(player_name)
     
     if isinstance(player_stats, dict) and "error" in player_stats:
         st.error("Player stats unavailable.")
     else:
-        # Create Tabs for 5, 10, 15 Game Trends
         tab1, tab2, tab3 = st.tabs(["Last 5 Games", "Last 10 Games", "Last 15 Games"])
-
         with tab1:
             st.subheader("📊 Last 5 Games Performance")
             st.pyplot(plot_player_stats(player_stats.head(5), "PTS", "Last 5 Games - Points"))
             st.pyplot(plot_player_stats(player_stats.head(5), "AST", "Last 5 Games - Assists"))
             st.pyplot(plot_player_stats(player_stats.head(5), "REB", "Last 5 Games - Rebounds"))
             st.pyplot(plot_player_stats(player_stats.head(5), "FG3M", "Last 5 Games - 3PT Made"))
-
         with tab2:
             st.subheader("📊 Last 10 Games Performance")
             st.pyplot(plot_player_stats(player_stats.head(10), "PTS", "Last 10 Games - Points"))
