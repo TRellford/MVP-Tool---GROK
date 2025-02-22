@@ -19,6 +19,63 @@ except KeyError:
 BALL_DONT_LIE_BASE_URL = "https://www.balldontlie.io/api/v1"
 ODDS_API_BASE_URL = "https://api.the-odds-api.com/v4/sports/basketball_nba"
 
+BALL_DONT_LIE_BASE_URL = "https://api.balldontlie.io/v1"
+
+# 🔑 Add your BallDontLie API Key here
+try:
+    BALLDONTLIE_API_KEY = st.secrets["balldontlie_api_key"]
+except KeyError:
+    st.error("API key missing for BallDontLie. Add it to Streamlit secrets.")
+    st.stop()
+
+def get_player_info(player_name):
+    """Fetch player information from BallDontLie API"""
+    url = f"{BALL_DONT_LIE_BASE_URL}/players?search={player_name}"
+    headers = {"Authorization": f"Bearer {BALLDONTLIE_API_KEY}"}
+
+    response = requests.get(url, headers=headers)
+    
+    if response.status_code == 200:
+        data = response.json()
+        if "data" in data and len(data["data"]) > 0:
+            return data["data"][0]  # Return the first matching player
+        else:
+            st.error("No player found.")
+            return None
+    else:
+        st.error(f"API Error {response.status_code}: {response.text}")
+        return None
+
+def get_player_stats(player_id):
+    """Fetch recent player stats from BallDontLie API"""
+    url = f"{BALL_DONT_LIE_BASE_URL}/stats?player_ids[]={player_id}"
+    headers = {"Authorization": f"Bearer {BALLDONTLIE_API_KEY}"}
+
+    response = requests.get(url, headers=headers)
+    
+    if response.status_code == 200:
+        return response.json().get("data", [])
+    else:
+        st.error(f"API Error {response.status_code}: {response.text}")
+        return []
+
+# Example Usage
+player_name = st.text_input("Enter Player Name")
+if st.button("Get Player Info"):
+    player_info = get_player_info(player_name)
+    if player_info:
+        st.write(f"**Player:** {player_info['first_name']} {player_info['last_name']}")
+        st.write(f"**Team:** {player_info['team']['full_name']}")
+        st.write(f"**Position:** {player_info['position']}")
+
+        # Fetch and display player stats
+        stats = get_player_stats(player_info["id"])
+        if stats:
+            st.write("📊 **Recent Stats:**")
+            for stat in stats[:5]:  # Show last 5 games
+                st.write(f"- Points: {stat['pts']}, Rebounds: {stat['reb']}, Assists: {stat['ast']}")
+
+
 # ✅ Scrape Latest Tweets from @Underdog__NBA for Injury Updates
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def scrape_underdog_nba_tweets():
