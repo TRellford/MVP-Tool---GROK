@@ -8,7 +8,7 @@ from nba_api.stats.static import players
 
 @st.cache_data(ttl=3600)
 def get_games_by_date(target_date):
-    """Fetch NBA games using Scoreboard API and display 'Away Team at Home Team'."""
+    """Fetch NBA games using Scoreboard API and display 'Away Team at Home Team' format."""
     formatted_date = target_date.strftime("%Y-%m-%d")
     try:
         scoreboard = scoreboardv2.ScoreboardV2(game_date=formatted_date)
@@ -17,12 +17,18 @@ def get_games_by_date(target_date):
         if games_df.empty:
             return ["No games available"]
 
-        game_list = [f"{row['VISITOR_TEAM_NAME']} at {row['HOME_TEAM_NAME']}" for _, row in games_df.iterrows()]
+        # Ensure necessary columns exist before attempting to use them
+        if "VISITOR_TEAM_NAME" not in games_df.columns or "HOME_TEAM_NAME" not in games_df.columns:
+            return ["Error: Missing team data from NBA API"]
+
+        game_list = [
+            f"{row['VISITOR_TEAM_NAME']} at {row['HOME_TEAM_NAME']}" 
+            for _, row in games_df.iterrows()
+        ]
         return list(set(game_list))  # Remove duplicates
 
     except Exception as e:
         return [f"Error fetching games: {str(e)}"]
-
 
 # --- Fetch Player Stats ---
 @st.cache_data(ttl=600)
