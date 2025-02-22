@@ -7,9 +7,8 @@ from nba_api.stats.endpoints import playergamelog, leaguedashteamstats, scoreboa
 from nba_api.stats.static import players
 
 @st.cache_data(ttl=3600)
-@st.cache_data(ttl=3600)
 def get_games_by_date(target_date):
-    """Fetch NBA games using Scoreboard API and ensure team names are always available."""
+    """Fetch NBA games using Scoreboard API and display in 'Away Team at Home Team' format."""
     formatted_date = target_date.strftime("%Y-%m-%d")
     
     try:
@@ -20,16 +19,16 @@ def get_games_by_date(target_date):
         if games_df.empty:
             return ["No games available"]
 
-        # Ensure required columns exist before proceeding
-        required_columns = {"HOME_TEAM_NAME", "VISITOR_TEAM_NAME"}
+        # Correct team naming from the NBA API
+        required_columns = {"TEAM_ABBREVIATION_HOME", "TEAM_ABBREVIATION_AWAY"}
         if not required_columns.issubset(games_df.columns):
             return ["Error: Missing team data from NBA API"]
 
-        # Format the game list correctly
+        # Format game list correctly
         game_list = [
-            f"{row['VISITOR_TEAM_NAME']} at {row['HOME_TEAM_NAME']}" 
+            f"{row['TEAM_ABBREVIATION_AWAY']} at {row['TEAM_ABBREVIATION_HOME']}" 
             for _, row in games_df.iterrows() 
-            if pd.notna(row['VISITOR_TEAM_NAME']) and pd.notna(row['HOME_TEAM_NAME'])
+            if pd.notna(row['TEAM_ABBREVIATION_AWAY']) and pd.notna(row['TEAM_ABBREVIATION_HOME'])
         ]
 
         if not game_list:
