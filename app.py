@@ -5,7 +5,8 @@ from nba_api.stats.endpoints import leaguegamefinder
 
 st.set_page_config(page_title="NBA Betting AI", layout="wide")
 
-# --- Function to Fetch NBA Games ---
+# --- Cache Function to Store NBA Games ---
+@st.cache_data(ttl=3600)  # Cache for 1 hour (games don’t change)
 def get_games_by_date(target_date):
     """Fetches NBA games scheduled for a given date."""
     game_finder = leaguegamefinder.LeagueGameFinder(season_nullable="2023-24")
@@ -26,7 +27,7 @@ def get_games_by_date(target_date):
 today = datetime.datetime.today()
 tomorrow = today + datetime.timedelta(days=1)
 
-# --- Fetch Games for Today & Tomorrow ---
+# --- Fetch Games (Using Cached Function) ---
 todays_games = get_games_by_date(today)
 tomorrows_games = get_games_by_date(tomorrow)
 
@@ -37,9 +38,6 @@ st.title("🏀 NBA Betting AI - Game Selection")
 selected_date = st.radio("Choose Game Date:", ["Today's Games", "Tomorrow's Games"])
 
 # Update dropdown based on the selected date
-if selected_date == "Today's Games":
-    game_selection = st.selectbox("Select a Game:", todays_games)
-else:
-    game_selection = st.selectbox("Select a Game:", tomorrows_games)
+game_selection = st.selectbox("Select a Game:", todays_games if selected_date == "Today's Games" else tomorrows_games)
 
 st.success(f"📅 You selected: {game_selection}")
