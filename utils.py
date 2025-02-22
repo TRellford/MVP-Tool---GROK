@@ -76,3 +76,42 @@ def fetch_sgp_builder(game_selection, props, multi_game=False):
         "SGP": prop_text,
         "Correlation Scores": {p: correlation_scores.get(p, "No correlation data") for p in props}
     }
+
+def fetch_best_props(player_name, trend_length):
+    """Fetches the best player props based on stats trends & defensive matchups."""
+    player_stats = fetch_player_data(player_name, trend_length)
+
+    if isinstance(player_stats, dict) and "error" in player_stats:
+        return {"error": "Player stats unavailable."}
+
+    # Get Opponent Defensive Ratings
+    try:
+        team_defense = leaguedashteamstats.LeagueDashTeamStats(season="2023-24").get_data_frames()[0]
+    except Exception as e:
+        return {"error": f"Failed to fetch team defense data: {str(e)}"}
+
+    # Find Weakest Defenses in Points, Assists, Rebounds
+    weakest_teams = {
+        "points": team_defense.sort_values("OPP_PTS", ascending=False).head(3)["TEAM_NAME"].tolist(),
+        "assists": team_defense.sort_values("OPP_AST", ascending=False).head(3)["TEAM_NAME"].tolist(),
+        "rebounds": team_defense.sort_values("OPP_REB", ascending=False).head(3)["TEAM_NAME"].tolist(),
+    }
+
+    # Ensure player_stats has valid data
+    if player_stats.empty or "Points" not in player_stats.columns:
+        return {"error": "Player stats missing or incomplete."}
+
+    # Determine Best Prop Based on Trends & Matchups
+    best_prop = max(
+        [("Points", player_stats["Points"].mean()), 
+         ("Assists", player_stats["Assists"].mean()), 
+         ("Rebounds", player_stats["Rebounds"].mean())],
+        key=lambda x: x[1]
+    )
+
+    return {
+        "best_prop": best_prop[0],
+        "average_stat": round(best_prop[1], 1),
+        "weak_defensive_teams": weakest_teams.get(best_prop[0].lower(), [])
+    }
+
