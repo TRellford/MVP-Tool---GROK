@@ -49,25 +49,39 @@ def get_games_by_date(target_date):
 
 # --- Fetch Player Stats ---
 @st.cache_data(ttl=600)
-def fetch_player_data(player_name, trend_length):
-    """Fetch player stats from NBA API."""
-    player_dict = players.get_players()
-    player = next((p for p in player_dict if p["full_name"].lower() == player_name.lower()), None)
 
-    if not player:
+
+def fetch_player_data(player_name, trend_length):
+    """Fetches recent player stats for the current NBA season."""
+
+    # Get Player ID from Name
+    player_id = get_player_id(player_name)  # Ensure you have a working get_player_id function
+
+    if not player_id:
         return {"error": "Player not found."}
 
-    player_id = player["id"]
-    game_log = playergamelog.PlayerGameLog(player_id=player_id, season="2023-24")
-    game_data = game_log.get_data_frames()[0].head(trend_length)
+    try:
+        # Fetch Game Logs from the API
+        game_logs = playergamelog.PlayerGameLog(player_id=player_id, season="2024-25", season_type_all_star="Regular Season")
+        game_df = game_logs.get_data_frames()[0]
 
-    return pd.DataFrame({
-        "Game Date": pd.to_datetime(game_data["GAME_DATE"]),
-        "Points": game_data["PTS"],
-        "Rebounds": game_data["REB"],
-        "Assists": game_data["AST"],
-        "3PT Made": game_data["FG3M"]
-    })
+        # 🚨 Debugging Check: Print Season Data
+        print("🛠️ DEBUG: Pulled season data from API:")
+        print(game_df.head(10))  # Show first 10 rows to confirm dates
+
+        # Convert Game Date and Sort By Recent Games
+        game_df["Game Date"] = pd.to_datetime(game_df["GAME_DATE"])
+        game_df = game_df.sort_values(by="Game Date", ascending=False)
+
+        # 🚨 Debugging Check: Confirm Latest Date Pulled
+        latest_date = game_df["Game Date"].max()
+        print(f"🛠️ DEBUG: Latest game in dataset: {latest_date}")
+
+        return game_df[["Game Date", "PTS", "REB", "AST", "FG3M", "BLK", "STL"]]
+
+    except Exception as e:
+        return {"error": f"Failed to fetch player stats: {str(e)}"}
+
 
 # --- Sharp Money & Line Movement Tracker ---
 def fetch_sharp_money_trends(game_selection):
