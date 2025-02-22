@@ -57,6 +57,30 @@ def fetch_player_metadata(player_name):
 
     return data["data"][0]
 
+def fetch_player_game_logs(player_name):
+    """Fetches recent player stats (points, assists, rebounds, 3PT made)."""
+    
+    # Get Player ID
+    player_dict = players.get_players()
+    player_id = next((p["id"] for p in player_dict if p["full_name"].lower() == player_name.lower()), None)
+    
+    if not player_id:
+        return {"error": "Player not found in NBA API."}
+    
+    try:
+        # Fetch game logs
+        game_logs = playergamelog.PlayerGameLog(player_id=player_id, season="2023-24", season_type_all_star="Regular Season")
+        game_df = game_logs.get_data_frames()[0]
+
+        # Convert & Sort Game Date
+        game_df["Game Date"] = pd.to_datetime(game_df["GAME_DATE"])
+        game_df = game_df.sort_values(by="Game Date", ascending=False)
+
+        return game_df[["Game Date", "PTS", "AST", "REB", "FG3M"]]
+
+    except Exception as e:
+        return {"error": f"Failed to fetch player stats: {str(e)}"}
+
 # --- Fetch Prop Betting Lines from Odds API ---
 def fetch_betting_odds(game_selection):
     url = f"https://sportsdata.io/api/betting-odds?game={game_selection}"
