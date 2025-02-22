@@ -7,24 +7,34 @@ from nba_api.stats.endpoints import playergamelog, leaguedashteamstats, scoreboa
 from nba_api.stats.static import players
 
 @st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600)
 def get_games_by_date(target_date):
-    """Fetch NBA games using Scoreboard API and display 'Away Team at Home Team' format."""
+    """Fetch NBA games using Scoreboard API and ensure team names are always available."""
     formatted_date = target_date.strftime("%Y-%m-%d")
+    
     try:
+        # Fetch scoreboard data from NBA API
         scoreboard = scoreboardv2.ScoreboardV2(game_date=formatted_date)
         games_df = scoreboard.get_data_frames()[0]
 
         if games_df.empty:
             return ["No games available"]
 
-        # Ensure necessary columns exist before attempting to use them
-        if "VISITOR_TEAM_NAME" not in games_df.columns or "HOME_TEAM_NAME" not in games_df.columns:
+        # Ensure required columns exist before proceeding
+        required_columns = {"HOME_TEAM_NAME", "VISITOR_TEAM_NAME"}
+        if not required_columns.issubset(games_df.columns):
             return ["Error: Missing team data from NBA API"]
 
+        # Format the game list correctly
         game_list = [
             f"{row['VISITOR_TEAM_NAME']} at {row['HOME_TEAM_NAME']}" 
-            for _, row in games_df.iterrows()
+            for _, row in games_df.iterrows() 
+            if pd.notna(row['VISITOR_TEAM_NAME']) and pd.notna(row['HOME_TEAM_NAME'])
         ]
+
+        if not game_list:
+            return ["Error: No valid games available from NBA API"]
+
         return list(set(game_list))  # Remove duplicates
 
     except Exception as e:
