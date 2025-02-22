@@ -15,21 +15,19 @@ tomorrow = today + datetime.timedelta(days=1)
 todays_games = get_games_by_date(today)
 tomorrows_games = get_games_by_date(tomorrow)
 
-# --- UI ---
-st.title("🏀 NBA Betting AI - Real-Time Analysis")
-
-# --- Main Navigation Menu ---
-menu_option = st.selectbox("Select a Section:", ["Player Search", "SGP Builder", "SGP+ Builder", "Game Predictions"])
+# --- Sidebar Navigation ---
+st.sidebar.title("🔍 Navigation")
+menu_option = st.sidebar.radio("Select a Section:", ["Player Search", "SGP Builder", "SGP+ Builder", "Game Predictions"])
 
 # --- Game Selection ---
-st.header("📅 Select NBA Games")
-selected_date = st.radio("Choose Game Date:", ["Today's Games", "Tomorrow's Games"])
-game_selection = st.selectbox(
+st.sidebar.header("📅 Select NBA Games")
+selected_date = st.sidebar.radio("Choose Game Date:", ["Today's Games", "Tomorrow's Games"])
+game_selection = st.sidebar.selectbox(
     "Select a Game:",
     todays_games if selected_date == "Today's Games" else tomorrows_games
 )
 
-st.success(f"📅 You selected: {game_selection}")
+st.sidebar.success(f"📅 Selected Game: {game_selection}")
 
 # --- Section 1: Player Search ---
 if menu_option == "Player Search":
@@ -70,10 +68,24 @@ elif menu_option == "SGP Builder":
 # --- Section 3: SGP+ Builder (Multi-Game Parlay) ---
 elif menu_option == "SGP+ Builder":
     st.header("🔥 Multi-Game Parlay (SGP+) Builder")
-    sgp_plus_props = st.multiselect("Select Props for Multi-Game Parlay:", ["Points", "Assists", "Rebounds", "3PT Made"])
-    if st.button("Generate SGP+"):
-        sgp_plus_result = fetch_sgp_builder(game_selection, sgp_plus_props, multi_game=True)
-        st.write(sgp_plus_result)
+
+    selected_games = st.multiselect("Select Games (Min: 2, Max: 12):", todays_games + tomorrows_games)
+
+    if len(selected_games) < 2:
+        st.warning("⚠️ You must select at least 2 games.")
+    elif len(selected_games) > 12:
+        st.warning("⚠️ You cannot select more than 12 games.")
+    else:
+        max_props_per_game = 24 // len(selected_games)
+        props_per_game = st.slider(f"Choose Props Per Game (Max {max_props_per_game}):", 2, max_props_per_game)
+
+        total_props = len(selected_games) * props_per_game
+        if total_props > 24:
+            st.error(f"🚨 Too many props selected! Max total allowed: 24. You selected {total_props}. Reduce props per game.")
+        else:
+            if st.button("Generate SGP+"):
+                sgp_plus_result = fetch_sgp_builder(selected_games, props_per_game, multi_game=True)
+                st.write(sgp_plus_result)
 
 # --- Section 4: Game Predictions (ML, Spread, O/U) ---
 elif menu_option == "Game Predictions":
