@@ -77,10 +77,23 @@ def get_player_id(player_name):
     
     return None  # Return None if player is not found
 
+from nba_api.stats.endpoints import playergamelog
+import pandas as pd
+from datetime import datetime
+from nba_api.stats.static import players
+
+def get_player_id(player_name):
+    """Finds the NBA player ID by name."""
+    player_dict = players.get_players()
+    
+    for player in player_dict:
+        if player["full_name"].lower() == player_name.lower():
+            return player["id"]
+    
+    return None  # Return None if player is not found
+
 def fetch_player_data(player_name, trend_length):
     """Fetches recent player stats for the current NBA season."""
-
-    # Get Player ID from Name
     player_id = get_player_id(player_name)
 
     if not player_id:
@@ -112,6 +125,7 @@ def fetch_player_data(player_name, trend_length):
     except Exception as e:
         print(f"❌ Error fetching player data: {e}")
         return {"error": f"Failed to fetch player stats: {str(e)}"}
+
 
 # --- Sharp Money & Line Movement Tracker ---
 def fetch_sharp_money_trends(game_selection):
