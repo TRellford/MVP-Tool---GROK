@@ -29,6 +29,19 @@ def get_games_by_date(target_date):
             if pd.notna(row['TEAM_CITY_NAME']) and pd.notna(row['TEAM_NAME'])
         }
 
+        from nba_api.stats.static import players
+
+def get_player_id(player_name):
+    """Finds the NBA player ID by name."""
+    player_dict = players.get_players()
+    
+    for player in player_dict:
+        if player["full_name"].lower() == player_name.lower():
+            return player["id"]
+    
+    return None  # Return None if player is not found
+
+
         # Construct game matchups using team names
         game_list = []
         for _, game in game_header_df.iterrows():
@@ -55,7 +68,7 @@ def fetch_player_data(player_name, trend_length):
     """Fetches recent player stats for the current NBA season."""
 
     # Get Player ID from Name
-    player_id = get_player_id(player_name)  # Ensure you have a working get_player_id function
+    player_id = get_player_id(player_name)
 
     if not player_id:
         return {"error": "Player not found."}
@@ -73,16 +86,17 @@ def fetch_player_data(player_name, trend_length):
         game_df["Game Date"] = pd.to_datetime(game_df["GAME_DATE"])
         game_df = game_df.sort_values(by="Game Date", ascending=False)
 
-        # 🚨 Debugging Check: Confirm Latest Date Pulled
-        latest_date = game_df["Game Date"].max()
-        print(f"🛠️ DEBUG: Latest game in dataset: {latest_date}")
+        # 🚨 Filter Out Future Games (Keep Only Past & Completed Games)
+        current_date = datetime.today().date()
+        game_df = game_df[game_df["Game Date"].dt.date <= current_date]
+
+        # 🚨 Debugging Check: Confirm Latest Game Date After Filtering
+        print(f"🛠️ DEBUG: Latest valid game after filtering: {game_df['Game Date'].max()}")
 
         return game_df[["Game Date", "PTS", "REB", "AST", "FG3M", "BLK", "STL"]]
 
     except Exception as e:
         return {"error": f"Failed to fetch player stats: {str(e)}"}
-
-
 # --- Sharp Money & Line Movement Tracker ---
 def fetch_sharp_money_trends(game_selection):
     """Fetches betting line movement & sharp money trends."""
