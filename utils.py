@@ -5,6 +5,7 @@ import datetime
 import streamlit as st
 from nba_api.stats.endpoints import playergamelog, leaguedashteamstats, scoreboardv2
 from nba_api.stats.static import players
+from datetime import datetime
 
 @st.cache_data(ttl=3600)
 
@@ -28,59 +29,6 @@ def get_games_by_date(target_date):
             for _, row in line_score_df.iterrows()
             if pd.notna(row['TEAM_CITY_NAME']) and pd.notna(row['TEAM_NAME'])
         }
-
-        from nba_api.stats.static import players
-
-def get_player_id(player_name):
-    """Finds the NBA player ID by name."""
-    player_dict = players.get_players()
-    
-    for player in player_dict:
-        if player["full_name"].lower() == player_name.lower():
-            return player["id"]
-    
-    return None  # Return None if player is not found
-
-
-        # Construct game matchups using team names
-        game_list = []
-        for _, game in game_header_df.iterrows():
-            home_team_id = game.get('HOME_TEAM_ID')
-            visitor_team_id = game.get('VISITOR_TEAM_ID')
-            
-            home_team_name = team_id_to_name.get(home_team_id, "Unknown Home Team")
-            visitor_team_name = team_id_to_name.get(visitor_team_id, "Unknown Visitor Team")
-            
-            matchup = f"{visitor_team_name} at {home_team_name}"
-            game_list.append(matchup)
-
-        return game_list if game_list else ["⚠️ No games scheduled for this date."]
-
-    except Exception as e:
-        return [f"❌ Error fetching games: {str(e)}"]
-
-
-# --- Fetch Player Stats ---
-@st.cache_data(ttl=600)
-from nba_api.stats.endpoints import playergamelog
-import pandas as pd
-from datetime import datetime
-from nba_api.stats.static import players
-
-def get_player_id(player_name):
-    """Finds the NBA player ID by name."""
-    player_dict = players.get_players()
-    
-    for player in player_dict:
-        if player["full_name"].lower() == player_name.lower():
-            return player["id"]
-    
-    return None  # Return None if player is not found
-
-from nba_api.stats.endpoints import playergamelog
-import pandas as pd
-from datetime import datetime
-from nba_api.stats.static import players
 
 def get_player_id(player_name):
     """Finds the NBA player ID by name."""
@@ -129,6 +77,7 @@ def fetch_player_data(player_name, trend_length):
     except Exception as e:
         print(f"❌ Error fetching player data: {e}")
         return {"error": f"Failed to fetch player stats: {str(e)}"}
+
 
 
 # --- Sharp Money & Line Movement Tracker ---
