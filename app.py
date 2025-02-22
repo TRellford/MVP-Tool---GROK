@@ -1,43 +1,66 @@
 import streamlit as st
 import datetime
-import pandas as pd
-from nba_api.stats.endpoints import leaguegamefinder
+from utils import get_games_by_date, fetch_player_data, fetch_best_props, fetch_game_predictions, fetch_sgp_builder
 
 st.set_page_config(page_title="NBA Betting AI", layout="wide")
-
-# --- Cache Function to Store NBA Games ---
-@st.cache_data(ttl=3600)  # Cache for 1 hour (games don’t change)
-def get_games_by_date(target_date):
-    """Fetches NBA games scheduled for a given date."""
-    game_finder = leaguegamefinder.LeagueGameFinder(season_nullable="2023-24")
-    games = game_finder.get_data_frames()[0]
-
-    # Convert game date format
-    games["GAME_DATE"] = pd.to_datetime(games["GAME_DATE"])
-
-    # Filter games by the target date
-    filtered_games = games[games["GAME_DATE"].dt.date == target_date.date()]
-
-    # Extract team matchups
-    game_list = [f"{row['TEAM_ABBREVIATION']} vs {row['MATCHUP'].split()[-1]}" for _, row in filtered_games.iterrows()]
-    
-    return game_list if game_list else ["No games available"]
 
 # --- Get Today's & Tomorrow's Dates ---
 today = datetime.datetime.today()
 tomorrow = today + datetime.timedelta(days=1)
 
-# --- Fetch Games (Using Cached Function) ---
+# --- Fetch Games ---
 todays_games = get_games_by_date(today)
 tomorrows_games = get_games_by_date(tomorrow)
 
 # --- UI ---
-st.title("🏀 NBA Betting AI - Game Selection")
+st.title("🏀 NBA Betting AI - Real-Time Game & Player Insights")
 
-# Radio button for date selection
+# --- Section 1: Select Game Date ---
+st.header("📅 Select NBA Games")
 selected_date = st.radio("Choose Game Date:", ["Today's Games", "Tomorrow's Games"])
-
-# Update dropdown based on the selected date
 game_selection = st.selectbox("Select a Game:", todays_games if selected_date == "Today's Games" else tomorrows_games)
 
 st.success(f"📅 You selected: {game_selection}")
+
+# --- Section 2: Player Search ---
+st.header("🔍 Player Performance & Prop Bets")
+player_name = st.text_input("Enter Player Name (e.g., Kevin Durant)")
+trend_length = st.radio("Select Trend Length", [5, 10, 15])
+
+if st.button("Get Player Stats"):
+    if not player_name:
+        st.warning("Please enter a player name.")
+    else:
+        stats_df = fetch_player_data(player_name, trend_length)
+        if "error" in stats_df:
+            st.error(stats_df["error"])
+        else:
+            st.write(f"📊 **Stats for {player_name}:**")
+            st.dataframe(stats_df)
+
+# --- Section 3: Best Player Prop Bets ---
+st.header("🔥 AI Best Player Props")
+if st.button("Find Best Player Prop"):
+    if not player_name:
+        st.warning("Please enter a player name.")
+    else:
+        best_prop = fetch_best_props(player_name, trend_length)
+        if "error" in best_prop:
+            st.error(best_prop["error"])
+        else:
+            st.success(f"🔥 Best Bet for {player_name}: **{best_prop['best_prop']}**")
+            st.write(f"📊 **Average {best_prop['best_prop']}:** {best_prop['average_stat']} per game")
+            st.write(f"🚨 **Weakest Defensive Teams Against {best_prop['best_prop']}:** {', '.join(best_prop['weak_defensive_teams'])}")
+
+# --- Section 4: Betting Predictions (ML, Spread, O/U) ---
+st.header("📈 Moneyline, Spread & Over/Under Predictions")
+if st.button("Get Game Predictions"):
+    predictions = fetch_game_predictions(game_selection)
+    st.write(predictions)
+
+# --- Section 5: Same Game Parlay Builder ---
+st.header("🎯 Same Game Parlay (SGP) Builder")
+sgp_props = st.multiselect("Select Props for SGP:", ["Points", "Assists", "Rebounds", "3PT Made"])
+if st.button("Generate SGP"):
+    sgp_result = fetch_sgp_builder(game_selection, sgp_props)
+    st.write(sgp_result)
