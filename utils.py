@@ -1,5 +1,4 @@
 import requests
-import os
 import pandas as pd
 import datetime
 import streamlit as st
@@ -8,15 +7,9 @@ from nba_api.stats.endpoints import playergamelog, leaguedashteamstats, scoreboa
 from nba_api.stats.static import players
 from datetime import datetime
 
-# --- Securely Load API Keys ---
-ODDS_API_KEY = os.getenv("ODDS_API_KEY")
-BALDONTLIE_API_KEY = os.getenv("BALDONTLIE_API_KEY")
-
-# Validate API Keys
-if not ODDS_API_KEY:
-    st.error("⚠️ Missing ODDS API Key. Set your environment variable.")
-if not BALDONTLIE_API_KEY:
-    st.error("⚠️ Missing BallDontLie API Key. Set your environment variable.")
+# --- Securely Load API Keys from Streamlit Secrets ---
+ODDS_API_KEY = st.secrets["apiKey"]
+BALDONTLIE_API_KEY = st.secrets["ball_dont_lie_api_key"]
 
 # --- Function to Fetch NBA Games by Date ---
 @st.cache_data(ttl=3600)
@@ -49,9 +42,6 @@ def get_games_by_date(target_date):
 
 # --- Fetch Player Metadata from BallDontLie API ---
 def fetch_player_metadata(player_name):
-    if not BALDONTLIE_API_KEY:
-        return {"error": "Missing BallDontLie API Key."}
-
     url = f"https://www.balldontlie.io/api/v1/players?search={player_name}"
     headers = {"Authorization": f"Bearer {BALDONTLIE_API_KEY}"}
 
@@ -69,9 +59,6 @@ def fetch_player_metadata(player_name):
 
 # --- Fetch Prop Betting Lines from Odds API ---
 def fetch_betting_odds(game_selection):
-    if not ODDS_API_KEY:
-        return {"error": "Missing Odds API Key."}
-
     url = f"https://sportsdata.io/api/betting-odds?game={game_selection}"
     headers = {"Authorization": f"Bearer {ODDS_API_KEY}"}
 
