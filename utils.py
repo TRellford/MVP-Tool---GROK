@@ -7,37 +7,45 @@ from nba_api.stats.endpoints import playergamelog, leaguedashteamstats, scoreboa
 from nba_api.stats.static import players
 
 @st.cache_data(ttl=3600)
+
 def get_games_by_date(target_date):
-    """Fetch NBA games using Scoreboard API and display in 'Away Team at Home Team' format."""
+    """Fetch NBA games for a specific date and return matchups in 'Away Team at Home Team' format."""
     formatted_date = target_date.strftime("%Y-%m-%d")
     
     try:
-        # Fetch scoreboard data from NBA API
+        # Fetch scoreboard data for the given date
         scoreboard = scoreboardv2.ScoreboardV2(game_date=formatted_date)
-        games_df = scoreboard.get_data_frames()[0]
+        game_header_df = scoreboard.game_header.get_data_frame()
+        line_score_df = scoreboard.line_score.get_data_frame()
 
-        if games_df.empty:
-            return ["No games available"]
+        # Handle cases where no games are found
+        if game_header_df.empty or line_score_df.empty:
+            return ["⚠️ No games available or data not yet released."]
 
-        # Correct team naming from the NBA API
-        required_columns = {"TEAM_ABBREVIATION_HOME", "TEAM_ABBREVIATION_AWAY"}
-        if not required_columns.issubset(games_df.columns):
-            return ["Error: Missing team data from NBA API"]
+        # Create a mapping of TEAM_ID to 'CITY_NAME TEAM_NAME'
+        team_id_to_name = {
+            row['TEAM_ID']: f"{row['TEAM_CITY_NAME']} {row['TEAM_NAME']}"
+            for _, row in line_score_df.iterrows()
+            if pd.notna(row['TEAM_CITY_NAME']) and pd.notna(row['TEAM_NAME'])
+        }
 
-        # Format game list correctly
-        game_list = [
-            f"{row['TEAM_ABBREVIATION_AWAY']} at {row['TEAM_ABBREVIATION_HOME']}" 
-            for _, row in games_df.iterrows() 
-            if pd.notna(row['TEAM_ABBREVIATION_AWAY']) and pd.notna(row['TEAM_ABBREVIATION_HOME'])
-        ]
+        # Construct game matchups using team names
+        game_list = []
+        for _, game in game_header_df.iterrows():
+            home_team_id = game.get('HOME_TEAM_ID')
+            visitor_team_id = game.get('VISITOR_TEAM_ID')
+            
+            home_team_name = team_id_to_name.get(home_team_id, "Unknown Home Team")
+            visitor_team_name = team_id_to_name.get(visitor_team_id, "Unknown Visitor Team")
+            
+            matchup = f"{visitor_team_name} at {home_team_name}"
+            game_list.append(matchup)
 
-        if not game_list:
-            return ["Error: No valid games available from NBA API"]
-
-        return list(set(game_list))  # Remove duplicates
+        return game_list if game_list else ["⚠️ No games scheduled for this date."]
 
     except Exception as e:
-        return [f"Error fetching games: {str(e)}"]
+        return [f"❌ Error fetching games: {str(e)}"]
+
 
 # --- Fetch Player Stats ---
 @st.cache_data(ttl=600)
