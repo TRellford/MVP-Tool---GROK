@@ -1,17 +1,20 @@
 import requests
 import os
+import pandas as pd
+import matplotlib.pyplot as plt
 from bs4 import BeautifulSoup
-from nba_api.stats.endpoints import playergamelog, commonplayerinfo
+from nba_api.stats.endpoints import playergamelog, leaguedashteamstats
 from nba_api.stats.static import players
+from nba_api.stats.endpoints import commonplayerinfo
 
 # API Keys
 ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 
 # --- Fetch Player Stats from NBA API ---
 def fetch_player_data(player_name, trend_length):
-    """ Fetches real-time player stats from NBA API """
-    
-    # Get Player ID from Name
+    """ Fetches real-time player stats from NBA API for visualization """
+
+    # Get Player ID
     player_dict = players.get_players()
     player = next((p for p in player_dict if p["full_name"].lower() == player_name.lower()), None)
 
@@ -24,23 +27,21 @@ def fetch_player_data(player_name, trend_length):
     game_log = playergamelog.PlayerGameLog(player_id=player_id, season="2023-24", season_type_all_star="Regular Season")
     game_data = game_log.get_data_frames()[0].head(trend_length)
 
-    # Extract Stats
-    stats = []
-    for _, row in game_data.iterrows():
-        stats.append({
-            "game_date": row["GAME_DATE"],
-            "points": row["PTS"],
-            "rebounds": row["REB"],
-            "assists": row["AST"],
-            "three_pointers_made": row["FG3M"],
-            "minutes": row["MIN"]
-        })
+    # Convert to DataFrame
+    stats_df = pd.DataFrame({
+        "Game Date": pd.to_datetime(game_data["GAME_DATE"]),
+        "Points": game_data["PTS"],
+        "Rebounds": game_data["REB"],
+        "Assists": game_data["AST"],
+        "3PT Made": game_data["FG3M"]
+    })
 
-    return {
-        "player_name": player_name,
-        "trend_length": trend_length,
-        "stats": stats
-    }
+    # Calculate Moving Averages (5-game rolling)
+    stats_df["Points MA"] = stats_df["Points"].rolling(window=5, min_periods=1).mean()
+    stats_df["Rebounds MA"] = stats_df["Rebounds"].rolling(window=5, min_periods=1).mean()
+    stats_df["Assists MA"] = stats_df["Assists"].rolling(window=5, min_periods=1).mean()
+
+    return stats_df
 
 # --- Fetch Live Betting Odds ---
 def fetch_odds(entity, prop_type):
@@ -52,22 +53,6 @@ def fetch_odds(entity, prop_type):
         return {"error": f"API Error: {response.status_code}, Response: {response.text}"}
     
     return response.json()
-
-# --- Scrape Underdog NBA Twitter for Injuries ---
-def scrape_underdog_twitter(game):
-    """ Scrapes Underdog NBA Twitter via Nitter """
-    url = "https://nitter.net/Underdog__NBA"
-    response = requests.get(url)
-
-    if response.status_code != 200:
-        return {"error": "Failed to retrieve Twitter data"}
-
-    soup = BeautifulSoup(response.text, 'html.parser')
-    tweets = soup.find_all('div', class_='timeline-item')
-
-    relevant_tweets = [tweet.text.strip() for tweet in tweets if game in tweet.text]
-    
-    return relevant_tweets[:3]  # Return last 3 tweets
 
 # --- AI-Based Betting Edge Detector ---
 def detect_betting_edge(ai_predicted_line, sportsbook_odds):
@@ -100,30 +85,35 @@ def detect_betting_edge(ai_predicted_line, sportsbook_odds):
         "risk_level": risk_level
     }
 
-# --- AI Model Processing for Real-Time Bets ---
-def run_ai_models(player_data, odds_data, prop_type, confidence_threshold):
-    """ Runs AI models to process real NBA data & predict betting outcomes """
+# --- Auto-Fetch Best Player Props Based on Matchups ---
+def fetch_best_props(player_name, trend_length):
+    """ Auto-selects best player props based on stats trends & defensive matchups """
 
-    if "error" in player_data or "error" in odds_data:
-        return {"error": "Missing or invalid data for AI model"}
+    # Get player stats
+    player_stats = fetch_player_data(player_name, trend_length)
 
-    # Calculate AI Adjusted Spread (Example: Adjusting based on past games)
-    avg_stat = sum(stat[prop_type.lower()] for stat in player_data["stats"]) / len(player_data["stats"])
+    if "error" in player_stats:
+        return {"error": "Player stats not available."}
 
-    # AI Prediction Output
-    ai_prediction = {
-        "player": player_data["player_name"],
-        "prop": prop_type,
-        "prediction": f"Over {avg_stat:.1f} (-110)",
-        "confidence_score": confidence_threshold,
-        "insight": f"{player_data['player_name']} has averaged {avg_stat:.1f} {prop_type.lower()} per game over the last {player_data['trend_length']} games.",
-        "adjusted_spread": avg_stat  # AI's suggested optimal line
+    # Get Opponent Defensive Ratings
+    team_defense = leaguedashteamstats.LeagueDashTeamStats(season="2023-24")
+    defense_df = team_defense.get_data_frames()[0]
+
+    # Find Weakest Defenses in Points, Assists, Rebounds
+    weakest_teams = {
+        "points": defense_df.sort_values("OPP_PTS", ascending=False).head(3)["TEAM_NAME"].tolist(),
+        "assists": defense_df.sort_values("OPP_AST", ascending=False).head(3)["TEAM_NAME"].tolist(),
+        "rebounds": defense_df.sort_values("OPP_REB", ascending=False).head(3)["TEAM_NAME"].tolist(),
     }
 
-    # Run Betting Edge Detection
-    edge_analysis = detect_betting_edge(ai_prediction, odds_data)
+    # Determine Best Prop Based on Trends & Matchups
+    best_prop = max(
+        [("Points", player_stats["Points"].mean()), ("Assists", player_stats["Assists"].mean()), ("Rebounds", player_stats["Rebounds"].mean())],
+        key=lambda x: x[1]
+    )
 
-    # Merge AI Prediction with Betting Edge Insights
-    ai_prediction.update(edge_analysis)
-
-    return ai_prediction
+    return {
+        "best_prop": best_prop[0],
+        "average_stat": round(best_prop[1], 1),
+        "weak_defensive_teams": weakest_teams[best_prop[0].lower()]
+    }
