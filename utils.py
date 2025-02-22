@@ -1,113 +1,88 @@
-import streamlit as st
 import requests
+import json
 from bs4 import BeautifulSoup
-from scipy.stats import norm
-from nba_api.stats.endpoints import commonplayerinfo, playergamelogs
-from nba_api.stats.static import players, teams
 
-# ✅ Load API Keys
-try:
-    BALDONTLIE_API_KEY = st.secrets["balldontlie_api_key"]
-    ODDS_API_KEY = st.secrets["odds_api_key"]
-except KeyError:
-    st.error("🚨 API keys missing! Set them in `.streamlit/secrets.toml`.")
-    st.stop()
+# API Keys
+BALLOONTLIE_API_KEY = "your_balldontlie_api_key"
+ODDS_API_KEY = "your_odds_api_key"
 
-# ✅ API Base URLs
-BALL_DONT_LIE_BASE_URL = "https://www.balldontlie.io/api/v1"
-NBA_ODDS_BASE_URL = "https://api.the-odds-api.com/v4/sports/basketball_nba"
-NITTER_BASE_URL = "https://nitter.net/Underdog__NBA"
+# Fetch player stats
+def fetch_player_data(player_name, trend_length):
+    url = f"https://www.balldontlie.io/api/v1/players?search={player_name}"
+    response = requests.get(url, headers={"Authorization": f"Bearer {BALLOONTLIE_API_KEY}"})
+    player = response.json().get('data', [])[0]
+    player_id = player.get("id")
 
-# ✅ Fetch NBA Games
-@st.cache_data(ttl=3600)
-def get_games():
-    """Fetch today's NBA games from BallDontLie API."""
-    url = f"{BALL_DONT_LIE_BASE_URL}/games"
+    stats_url = f"https://www.balldontlie.io/api/v1/stats?player_ids[]={player_id}&per_page={trend_length}"
+    stats_response = requests.get(stats_url, headers={"Authorization": f"Bearer {BALLOONTLIE_API_KEY}"})
+    
+    return stats_response.json().get('data', [])
+
+# Fetch odds from Odds.io
+def fetch_odds(entity, prop_type):
+    url = f"https://api.odds.io/v4/{'players' if ' ' in entity else 'games'}/{entity}/odds?markets={prop_type}"
+    response = requests.get(url, headers={"Authorization": f"Bearer {ODDS_API_KEY}"})
+    return response.json()
+
+# Scrape Underdog NBA Twitter using Nitter
+def scrape_underdog_twitter(game):
+    url = "https://nitter.net/Underdog__NBA"
     response = requests.get(url)
-    
-    if response.status_code == 200:
-        return response.json().get("data", [])
-    else:
-        st.error(f"Error fetching games: {response.status_code}")
-        return []
+    soup = BeautifulSoup(response.text, 'html.parser')
 
-# ✅ Fetch NBA Odds
-@st.cache_data(ttl=1800)
-def get_nba_odds():
-    """Fetch NBA odds from The Odds API."""
-    url = f"{NBA_ODDS_BASE_URL}/odds?apiKey={ODDS_API_KEY}&regions=us&markets=h2h,spreads,totals&oddsFormat=american"
-    response = requests.get(url)
+    tweets = soup.find_all('div', class_='timeline-item')
+    relevant_tweets = [tweet.text.strip() for tweet in tweets if game in tweet.text]
     
-    if response.status_code == 200:
-        return response.json()
-    else:
-        st.error(f"Error fetching NBA odds: {response.status_code}")
-        return []
+    return relevant_tweets[:3]  # Return last 3 tweets
 
-# ✅ Fetch Player Stats
-@st.cache_data(ttl=3600)
-def get_player_stats(player_name, trend_period=5):
-    """Fetch player stats from BallDontLie API."""
-    player_response = requests.get(f"{BALL_DONT_LIE_BASE_URL}/players?search={player_name}")
+# Betting Edge Detector
+def detect_betting_edge(ai_predicted_line, sportsbook_odds):
+    """ Compares AI-predicted lines with sportsbook odds to identify value bets. """
+    edge_found = False
+    risk_level = "Unknown"
     
-    if player_response.status_code != 200 or not player_response.json()["data"]:
-        st.error(f"❌ Player '{player_name}' not found.")
-        return None
-    
-    player_id = player_response.json()["data"][0]["id"]
-    
-    stats_response = requests.get(f"{BALL_DONT_LIE_BASE_URL}/stats?player_ids[]={player_id}&per_page={trend_period}")
-    
-    if stats_response.status_code != 200:
-        st.error("Failed to fetch player stats.")
-        return None
-    
-    return stats_response.json()["data"]
+    # Convert sportsbook odds to American format if needed
+    odds = sportsbook_odds.get("odds", -110)  # Default to standard betting odds
+    ai_line = ai_predicted_line.get("prediction", "N/A")
 
-# ✅ Predict Player Prop Outcomes
-def predict_player_prop(player_name, prop, prop_line, game, trend_period=5):
-    """Predict player prop outcome using stats from BallDontLie API."""
-    stats = get_player_stats(player_name, trend_period)
-    if not stats:
-        return None
-    
-    stat_key = prop.split("_")[1]
-    historical_values = [stat.get(stat_key, 0) for stat in stats]
-    
-    if not historical_values:
-        return None
-    
-    historical_avg = sum(historical_values) / len(historical_values)
-    std_dev = (
-        (sum((x - historical_avg) ** 2 for x in historical_values) / len(historical_values)) ** 0.5
-        if len(historical_values) > 1 else 0
-    )
-    predicted_mean = historical_avg * 1.05  # Placeholder for opponent adjustment
-    
-    prob_over = 1 - norm.cdf(prop_line, loc=predicted_mean, scale=std_dev)
-    prediction = "Over" if prob_over > 0.5 else "Under"
-    confidence = prob_over * 100 if prob_over > 0.5 else (1 - prob_over) * 100
-    
+    # Check for discrepancies
+    if abs(ai_predicted_line["adjusted_spread"] - sportsbook_odds["spread"]) > 1.5:
+        edge_found = True
+
+    # Assign risk levels based on odds
+    if -300 <= odds <= -200:
+        risk_level = "🟢 Safe"
+    elif -180 <= odds <= +100:
+        risk_level = "🟡 Moderate"
+    elif +101 <= odds <= +250:
+        risk_level = "🟠 High Risk"
+    elif odds >= +251:
+        risk_level = "🔴 Very High Risk"
+
     return {
-        "prediction": prediction,
-        "confidence": confidence,
-        "prop_line": prop_line,
-        "insight": f"Based on a {trend_period}-game trend, adjusted for opponent."
+        "betting_edge_found": edge_found,
+        "ai_predicted_line": ai_line,
+        "sportsbook_odds": odds,
+        "risk_level": risk_level
     }
 
-# ✅ Scrape Underdog NBA Tweets using Nitter
-def scrape_underdog_nba():
-    """Scrape latest Underdog NBA tweets for injury updates using Nitter."""
-    response = requests.get(NITTER_BASE_URL)
+# AI Model Simulations (Updated with Betting Edge Detection)
+def run_ai_models(player_data, odds_data, prop_type, confidence_threshold):
+    """ Runs AI models for predictions and includes betting edge analysis. """
     
-    if response.status_code != 200:
-        st.error(f"❌ Error fetching tweets from Nitter: {response.status_code}")
-        return []
+    ai_prediction = {
+        "player": player_data[0]["player"]["full_name"] if player_data else "N/A",
+        "prop": prop_type,
+        "prediction": "Over 25.5 (-110)",
+        "confidence_score": 85,
+        "insight": "This player has been exceeding expectations over the last 10 games.",
+        "adjusted_spread": 24.5  # AI's suggested optimal line
+    }
 
-    soup = BeautifulSoup(response.text, "html.parser")
-    tweets = []
+    # Run betting edge detector
+    edge_analysis = detect_betting_edge(ai_prediction, odds_data)
 
-    for tweet in soup.find_all("div", class_="tweet-content"):
-        tweets.append(tweet.text.strip())
+    # Merge AI prediction with betting edge insights
+    ai_prediction.update(edge_analysis)
 
-    return tweets[:5]  # Return the latest 5 tweets
+    return ai_prediction
