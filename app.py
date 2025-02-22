@@ -1,6 +1,5 @@
 import streamlit as st
 import requests
-import snscrape.modules.twitter as sntwitter
 import pandas as pd
 import json
 from scipy.stats import norm
@@ -65,17 +64,23 @@ def get_nba_odds():
         st.error(f"Error fetching NBA odds: {response.status_code}")
         return []
 
+@st.cache_data(ttl=600)  # Cache for 10 minutes
 def scrape_underdog_nba():
-    """Scrape latest Underdog NBA tweets for injury updates."""
-    tweets = []
-    query = "from:Underdog__NBA"
-    
-    for i, tweet in enumerate(sntwitter.TwitterSearchScraper(query).get_items()):
-        if i >= 5:  # Get the latest 5 tweets
-            break
-        tweets.append(tweet.content)
+    """Scrape latest Underdog NBA tweets for injury updates using Nitter."""
+    url = "https://nitter.net/Underdog__NBA/rss"  # Using Nitter for scraping
+    headers = {"User-Agent": "Mozilla/5.0"}
 
-    return tweets
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        # Extract latest 5 tweets
+        tweets = response.text.split("<title>")[2:7]
+        return [tweet.split("</title>")[0] for tweet in tweets]
+    
+    except Exception as e:
+        st.error(f"⚠️ Failed to fetch tweets: {e}")
+        return []
 
 # 🎨 Streamlit UI
 st.title("🏀 NBA Betting Insights & Injury Updates")
@@ -111,4 +116,3 @@ if injury_updates:
         st.write(f"🗞 {update}")
 else:
     st.warning("No injury updates found.")
-
