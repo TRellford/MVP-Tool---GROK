@@ -101,7 +101,11 @@ def fetch_player_data(player_name, trend_length):
 
     try:
         # Fetch Game Logs from the API
-        game_logs = playergamelog.PlayerGameLog(player_id=player_id, season="2024-25", season_type_all_star="Regular Season")
+        game_logs = playergamelog.PlayerGameLog(
+            player_id=player_id, 
+            season="2024-25", 
+            season_type_all_star="Regular Season"
+        )
         game_df = game_logs.get_data_frames()[0]
 
         # 🚨 Debugging Check: Print Season Data
