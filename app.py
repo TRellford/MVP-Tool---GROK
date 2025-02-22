@@ -10,11 +10,11 @@ from utils import (
 
 st.set_page_config(page_title="NBA Betting AI", layout="wide")
 
-# --- Sidebar Navigation (Only Dropdown Menu) ---
+# --- Sidebar Navigation ---
 st.sidebar.title("🔍 Navigation")
 menu_option = st.sidebar.selectbox("Select a Section:", ["Player Search", "SGP", "SGP+", "Game Predictions"])
 
-# --- Get Current and Next Day's Games ---
+# --- Get Today's and Tomorrow's Games ---
 today = datetime.datetime.today().date()
 tomorrow = today + timedelta(days=1)
 
@@ -51,8 +51,8 @@ if menu_option == "Player Search":
 
                 # 📊 Ensure Dates Are Sorted Correctly
                 stats_df["Game Date"] = pd.to_datetime(stats_df["Game Date"])
-                stats_df = stats_df.sort_values(by="Game Date", ascending=False)  # Sort by recent games
-                stats_df["Game Date"] = stats_df["Game Date"].dt.strftime("%b %d")  # Convert to 'Feb 22' format
+                stats_df = stats_df.sort_values(by="Game Date", ascending=False)
+                stats_df["Game Date"] = stats_df["Game Date"].dt.strftime("%b %d")
 
                 # 📊 Table of Averages for Selected Props
                 st.subheader("📊 Average Stats Over Selected Games")
@@ -76,19 +76,12 @@ if menu_option == "Player Search":
                     if prop in stats_df.columns:
                         st.subheader(f"📊 {prop} - Last {trend_length} Games")
                         
-                        # Create a Matplotlib Figure for Better Styling
                         fig, ax = plt.subplots(figsize=(8, 4))
                         ax.bar(stats_df["Game Date"], stats_df[prop], color="royalblue", alpha=0.8)
-                        
-                        # Improve Label Visibility
                         ax.set_xlabel("Game Date", fontsize=12)
                         ax.set_ylabel(prop, fontsize=12)
                         ax.set_title(f"{prop} Over Last {trend_length} Games", fontsize=14, fontweight="bold")
-                        
-                        # Rotate X-Axis Labels If Needed
                         ax.set_xticklabels(stats_df["Game Date"], rotation=30, ha="right", fontsize=10)
-                        
-                        # Display Graph
                         st.pyplot(fig)
 
 # --- Section 2: SGP (Same Game Parlay - Only 1 Game Allowed) ---
