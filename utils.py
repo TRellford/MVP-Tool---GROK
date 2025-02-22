@@ -1,61 +1,49 @@
 import streamlit as st
 import requests
+import snscrape.modules.twitter as sntwitter
 from scipy.stats import norm
 from datetime import datetime
 import json
 
-# Access API key from Streamlit secrets
+# ✅ Load API Keys
 try:
-    API_KEY = st.secrets["api_key"]
-except KeyError:
-    st.error("API key not found in Streamlit secrets. Make sure it's set in .streamlit/secrets.toml or Streamlit Cloud.")
-    st.stop()  # Stop execution if API key is missing
+    API_KEYS = {
+        "balldontlie": st.secrets["balldontlie_api_key"],
+        "odds_api": st.secrets["odds_api_key"]
+    }
+except KeyError as e:
+    st.error(f"🚨 API key missing: {e}")
+    st.stop()
 
+# ✅ API Base URLs
 BASE_URL = "https://api.the-odds-api.com/v4/sports/basketball_nba"
 BALL_DONT_LIE_BASE_URL = "https://www.balldontlie.io/api/v1"
 
+# 📌 Cache Data for Efficiency
 @st.cache_data(ttl=3600)  # Cache for 1 hour
-def get_games_by_date(date_str):
-    """Fetch NBA games for a specific date."""
-    url = f"{BASE_URL}/odds?apiKey={API_KEY}&regions=us&markets=h2h,spreads,totals&oddsFormat=american&date={date_str}T00:00:00Z"
+def get_games():
+    """Fetch today's NBA games from BallDontLie API."""
+    url = f"{BALL_DONT_LIE_BASE_URL}/games"
+    response = requests.get(url)
     
-    try:
-        with st.spinner("Fetching games..."):
-            response = requests.get(url)
-            response.raise_for_status()
-        games = response.json()
-        return [
-            {
-                "id": game["id"],
-                "home_team": game["home_team"],
-                "away_team": game["away_team"],
-                "commence_time": game["commence_time"],
-                "bookmakers": game["bookmakers"]
-            }
-            for game in games
-        ]
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error fetching games: {e}")
+    if response.status_code == 200:
+        return response.json()["data"]
+    else:
+        st.error(f"Error fetching games: {response.status_code}")
         return []
 
 @st.cache_data(ttl=3600)  # Cache for 1 hour
-
 def find_player_games(player_name):
     """Find upcoming games for a player based on their team."""
-    
     url = f"{BALL_DONT_LIE_BASE_URL}/players?search={player_name}"
     
     try:
         response = requests.get(url)
-        st.write(f"🔍 API Response Status: {response.status_code}")  # Debugging
-
         if response.status_code != 200:
             st.error(f"🚨 API Error: {response.status_code}")
-            st.write(response.text)  # Print response for debugging
             return []
         
         data = response.json()
-        
         if "data" not in data or not data["data"]:
             st.error(f"❌ No players found for: {player_name}")
             return []
@@ -64,54 +52,39 @@ def find_player_games(player_name):
         player_info = data["data"][0]
         player_team = player_info.get("team", {}).get("full_name", "Unknown Team")
 
-        st.write(f"✅ Found Player: {player_info['first_name']} {player_info['last_name']}, Team: {player_team}")
-
-        # Now fetch NBA games
-        games_url = f"https://www.balldontlie.io/api/v1/games"
+        # Fetch NBA games
+        games_url = f"{BALL_DONT_LIE_BASE_URL}/games"
         games_response = requests.get(games_url)
-        
         if games_response.status_code != 200:
             st.error(f"🚨 Error fetching NBA games: {games_response.status_code}")
             return []
 
         games = games_response.json().get("data", [])
-
-        # Filter games where the player's team is playing
-        player_games = [
+        return [
             {
                 "id": game["id"],
                 "home_team": game["home_team"]["full_name"],
                 "away_team": game["visitor_team"]["full_name"],
                 "commence_time": game["date"]
             }
-            for game in games
-            if player_team in [game["home_team"]["full_name"], game["visitor_team"]["full_name"]]
+            for game in games if player_team in [game["home_team"]["full_name"], game["visitor_team"]["full_name"]]
         ]
-
-        return player_games
 
     except requests.exceptions.RequestException as e:
         st.error(f"❌ Request failed: {e}")
         return []
 
-
-def get_player_prop_odds(game_id, prop):
-    """Fetch player prop odds from The Odds API."""
-    url = f"{BASE_URL}/events/{game_id}/odds?apiKey={API_KEY}&regions=us&markets={prop}&oddsFormat=american"
+@st.cache_data(ttl=1800)  # Cache for 30 minutes
+def get_nba_odds():
+    """Fetch NBA odds from The Odds API."""
+    url = f"{BASE_URL}/odds?apiKey={API_KEYS['odds_api']}&regions=us&markets=h2h,spreads,totals&oddsFormat=american"
+    response = requests.get(url)
     
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        data = response.json()
-        
-        for market in data.get("bookmakers", [{}])[0].get("markets", []):
-            if market["key"] == prop:
-                return market["outcomes"]
-        return None
-    
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error fetching prop odds: {e}")
-        return None
+    if response.status_code == 200:
+        return response.json()
+    else:
+        st.error(f"Error fetching NBA odds: {response.status_code}")
+        return []
 
 @st.cache_data(ttl=3600)  # Cache for 1 hour
 def get_player_stats(player_name, trend_period=5):
@@ -132,6 +105,19 @@ def get_player_stats(player_name, trend_period=5):
     
     return stats_response.json()["data"]
 
+def scrape_underdog_nba():
+    """Scrape latest Underdog NBA tweets for injury updates."""
+    tweets = []
+    query = "from:Underdog__NBA"
+    
+    for i, tweet in enumerate(sntwitter.TwitterSearchScraper(query).get_items()):
+        if i >= 5:  # Get the latest 5 tweets
+            break
+        tweets.append(tweet.content)
+
+    return tweets
+
+# 🔥 Predict Player Props
 def predict_player_prop(player_name, prop, prop_line, game, trend_period=5):
     """Predict player prop outcome using stats from Ball Don't Lie API."""
     stats = get_player_stats(player_name, trend_period)
@@ -154,13 +140,8 @@ def predict_player_prop(player_name, prop, prop_line, game, trend_period=5):
     prediction = "Over" if prob_over > 0.5 else "Under"
     confidence = prob_over * 100 if prob_over > 0.5 else (1 - prob_over) * 100
     
-    odds_data = get_player_prop_odds(game["id"], prop)
+    odds_data = get_nba_odds()
     odds = "-110"
-    if odds_data:
-        for outcome in odds_data:
-            if outcome["name"] == player_name and float(outcome["point"]) == prop_line:
-                odds = str(outcome["price"])
-                break
     
     edge = predicted_mean - prop_line if prediction == "Over" else prop_line - predicted_mean
     risk_level = get_risk_level(int(odds))
@@ -175,6 +156,7 @@ def predict_player_prop(player_name, prop, prop_line, game, trend_period=5):
         "risk_level": risk_level
     }
 
+# 🎯 Odds Calculations
 def odds_to_implied_prob(odds):
     """Convert American odds to implied probability."""
     if odds > 0:
