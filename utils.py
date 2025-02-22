@@ -1,195 +1,147 @@
 import requests
-import os
 import pandas as pd
 import datetime
 import streamlit as st
+from bs4 import BeautifulSoup  # Web scraping for Nitter
 from nba_api.stats.endpoints import playergamelog, leaguedashteamstats, scoreboardv2
 from nba_api.stats.static import players
+from datetime import datetime
 
+# --- Securely Load API Keys from Streamlit Secrets ---
+ODDS_API_KEY = st.secrets["apiKey"]
+BALDONTLIE_API_KEY = st.secrets["ball_dont_lie_api_key"]
+
+# --- Function to Fetch NBA Games by Date ---
 @st.cache_data(ttl=3600)
-
 def get_games_by_date(target_date):
-    """Fetch NBA games for a specific date and return matchups in 'Away Team at Home Team' format."""
     formatted_date = target_date.strftime("%Y-%m-%d")
     
     try:
-        # Fetch scoreboard data for the given date
         scoreboard = scoreboardv2.ScoreboardV2(game_date=formatted_date)
         game_header_df = scoreboard.game_header.get_data_frame()
         line_score_df = scoreboard.line_score.get_data_frame()
 
-        # Handle cases where no games are found
         if game_header_df.empty or line_score_df.empty:
             return ["⚠️ No games available or data not yet released."]
 
-        # Create a mapping of TEAM_ID to 'CITY_NAME TEAM_NAME'
         team_id_to_name = {
             row['TEAM_ID']: f"{row['TEAM_CITY_NAME']} {row['TEAM_NAME']}"
             for _, row in line_score_df.iterrows()
             if pd.notna(row['TEAM_CITY_NAME']) and pd.notna(row['TEAM_NAME'])
         }
 
-        # Construct game matchups using team names
-        game_list = []
-        for _, game in game_header_df.iterrows():
-            home_team_id = game.get('HOME_TEAM_ID')
-            visitor_team_id = game.get('VISITOR_TEAM_ID')
-            
-            home_team_name = team_id_to_name.get(home_team_id, "Unknown Home Team")
-            visitor_team_name = team_id_to_name.get(visitor_team_id, "Unknown Visitor Team")
-            
-            matchup = f"{visitor_team_name} at {home_team_name}"
-            game_list.append(matchup)
+        matchups = [
+            f"{team_id_to_name.get(row['VISITOR_TEAM_ID'], 'Unknown Team')} vs {team_id_to_name.get(row['HOME_TEAM_ID'], 'Unknown Team')}"
+            for _, row in game_header_df.iterrows()
+        ]
 
-        return game_list if game_list else ["⚠️ No games scheduled for this date."]
+        return matchups
 
     except Exception as e:
         return [f"❌ Error fetching games: {str(e)}"]
 
+# --- Fetch Player Metadata from BallDontLie API ---
+def fetch_player_metadata(player_name):
+    url = f"https://www.balldontlie.io/api/v1/players?search={player_name}"
+    headers = {"Authorization": f"Bearer {BALDONTLIE_API_KEY}"}
 
-# --- Fetch Player Stats ---
-@st.cache_data(ttl=600)
-def fetch_player_data(player_name, trend_length):
-    """Fetch player stats from NBA API."""
-    player_dict = players.get_players()
-    player = next((p for p in player_dict if p["full_name"].lower() == player_name.lower()), None)
-
-    if not player:
-        return {"error": "Player not found."}
-
-    player_id = player["id"]
-    game_log = playergamelog.PlayerGameLog(player_id=player_id, season="2023-24")
-    game_data = game_log.get_data_frames()[0].head(trend_length)
-
-    return pd.DataFrame({
-        "Game Date": pd.to_datetime(game_data["GAME_DATE"]),
-        "Points": game_data["PTS"],
-        "Rebounds": game_data["REB"],
-        "Assists": game_data["AST"],
-        "3PT Made": game_data["FG3M"]
-    })
-
-# --- Sharp Money & Line Movement Tracker ---
-def fetch_sharp_money_trends(game_selection):
-    """Fetches betting line movement & sharp money trends."""
-    url = f"https://sportsdata.io/api/betting-trends?game={game_selection}"
-    response = requests.get(url, headers={"Authorization": f"Bearer {os.getenv('BETTING_API_KEY')}"})
+    response = requests.get(url, headers=headers)
 
     if response.status_code != 200:
-        return {"error": f"Failed to fetch data: {response.text}"}
+        return {"error": f"Failed to fetch player data: {response.text}"}
 
     data = response.json()
-    return {
-        "Public Bets %": data["public_bets"],
-        "Sharp Money %": data["sharp_money"],
-        "Line Movement": data["line_movement"]
-    }
+    
+    if not data.get("data"):
+        return {"error": "Player not found."}
 
-# --- Fetch SGP Builder with Correlation Score ---
-def fetch_sgp_builder(game_selection, props, multi_game=False):
-    """Generates an optimized SGP based on player props & correlation scores."""
-    correlation_scores = {
-        "Points & Assists": 0.85, 
-        "Rebounds & Blocks": 0.78,
-        "3PT & Points": 0.92
-    }
+    return data["data"][0]
 
-    prop_text = f"SGP+ for multiple games" if multi_game else f"SGP for {game_selection}"
-    return {
-        "SGP": prop_text,
-        "Correlation Scores": {p: correlation_scores.get(p, "No correlation data") for p in props}
-    }
+# --- Fetch Prop Betting Lines from Odds API ---
+def fetch_betting_odds(game_selection):
+    url = f"https://sportsdata.io/api/betting-odds?game={game_selection}"
+    headers = {"Authorization": f"Bearer {ODDS_API_KEY}"}
 
-def fetch_best_props(player_name, trend_length):
-    """Fetches the best player props based on stats trends & defensive matchups."""
-    player_stats = fetch_player_data(player_name, trend_length)
+    response = requests.get(url, headers=headers)
 
-    if isinstance(player_stats, dict) and "error" in player_stats:
-        return {"error": "Player stats unavailable."}
+    if response.status_code != 200:
+        return {"error": f"Failed to fetch betting odds: {response.text}"}
 
-    # Get Opponent Defensive Ratings
+    return response.json()
+
+# --- Fetch Opponent Defensive Data ---
+def fetch_defensive_data():
     try:
         team_defense = leaguedashteamstats.LeagueDashTeamStats(season="2023-24").get_data_frames()[0]
+        return team_defense
     except Exception as e:
         return {"error": f"Failed to fetch team defense data: {str(e)}"}
 
-    # Find Weakest Defenses in Points, Assists, Rebounds
-    weakest_teams = {
-        "points": team_defense.sort_values("OPP_PTS", ascending=False).head(3)["TEAM_NAME"].tolist(),
-        "assists": team_defense.sort_values("OPP_AST", ascending=False).head(3)["TEAM_NAME"].tolist(),
-        "rebounds": team_defense.sort_values("OPP_REB", ascending=False).head(3)["TEAM_NAME"].tolist(),
-    }
-
-    # Ensure player_stats has valid data
-    if player_stats.empty or "Points" not in player_stats.columns:
-        return {"error": "Player stats missing or incomplete."}
-
-    # Determine Best Prop Based on Trends & Matchups
-    best_prop = max(
-        [("Points", player_stats["Points"].mean()), 
-         ("Assists", player_stats["Assists"].mean()), 
-         ("Rebounds", player_stats["Rebounds"].mean())],
-        key=lambda x: x[1]
-    )
-
-    return {
-        "best_prop": best_prop[0],
-        "average_stat": round(best_prop[1], 1),
-        "weak_defensive_teams": weakest_teams.get(best_prop[0].lower(), [])
-    }
-
-def fetch_game_predictions(game_selection):
-    """Fetches AI-generated Moneyline, Spread, and Over/Under predictions for a selected game."""
+# --- Fetch Injury & Roster Updates from Nitter ---
+def fetch_injury_updates():
+    """Scrapes Underdog NBA injury updates from Nitter."""
     
-    if not game_selection or "vs" not in game_selection:
-        return {"error": "Invalid game selection. Please select a valid game."}
-
-    home_team, away_team = game_selection.split(" vs ")
-
-    # Example AI-generated predictions (Replace with real model later)
-    predictions = {
-        "Game": f"{home_team} vs {away_team}",
-        "Moneyline": f"{home_team} to win (Win Probability: 55%)",
-        "Spread": f"{home_team} -3.5 (-110)",
-        "Over/Under": f"Over 225.5 (-108)",
-        "Edge Detector": "🔥 AI Model suggests home team should be -5.0 favorites, creating a 1.5-point edge."
-    }
+    nitter_url = "https://nitter.net/Underdog__NBA"
     
-    return predictions
+    try:
+        response = requests.get(nitter_url, headers={"User-Agent": "Mozilla/5.0"})
+        
+        if response.status_code != 200:
+            return {"error": f"Failed to scrape Nitter. Status: {response.status_code}"}
+        
+        soup = BeautifulSoup(response.text, "html.parser")
+        tweets = soup.find_all("div", class_="tweet-content")  # Locate tweets
+        
+        injury_updates = []
+        
+        for tweet in tweets:
+            text = tweet.get_text(strip=True)
+            if "injury" in text.lower() or "out" in text.lower() or "available" in text.lower():
+                injury_updates.append(text)
 
-def fetch_sharp_money_trends(game_selection):
-    """Fetches betting line movement & sharp money trends from Sports Data API."""
+        return injury_updates if injury_updates else ["No injury updates found."]
     
-    if not game_selection or "vs" not in game_selection:
-        return {"error": "Invalid game selection. Please select a valid game."}
+    except Exception as e:
+        return {"error": f"Failed to fetch injury updates: {str(e)}"}
 
-    url = f"https://sportsdata.io/api/betting-trends?game={game_selection}"
-    
-    response = requests.get(url, headers={"Authorization": f"Bearer {os.getenv('BETTING_API_KEY')}"})
-    
-    if response.status_code != 200:
-        return {"error": f"Failed to fetch data: {response.text}"}
-    
-    data = response.json()
-    
-    return {
-        "Public Bets %": data.get("public_bets", "N/A"),
-        "Sharp Money %": data.get("sharp_money", "N/A"),
-        "Line Movement": data.get("line_movement", "N/A")
-    }
-def fetch_sgp_builder(game_selection, props, multi_game=False):
-    """Generates an optimized Same Game Parlay (SGP) based on player props & correlation scores."""
+# --- First Basket Prediction (Tip-Off Analysis) ---
+def fetch_first_basket_data():
+    try:
+        scoreboard = scoreboardv2.ScoreboardV2()
+        game_header_df = scoreboard.game_header.get_data_frame()
 
-    correlation_scores = {
-        "Points & Assists": 0.85, 
-        "Rebounds & Blocks": 0.78,
-        "3PT & Points": 0.92
-    }
+        tip_off_winners = game_header_df.groupby("HOME_TEAM_ID")["HOME_TEAM_WINS"].mean()
+        return tip_off_winners.sort_values(ascending=False).to_dict()
 
-    prop_text = f"SGP+ for multiple games" if multi_game else f"SGP for {game_selection}"
+    except Exception as e:
+        return {"error": f"Failed to fetch first basket data: {str(e)}"}
 
-    return {
-        "SGP": prop_text,
-        "Correlation Scores": {p: correlation_scores.get(p, "No correlation data") for p in props}
-    }
+# --- Streamlit UI ---
+st.title("🏀 NBA Betting & Prop Analyzer with Full Data Integrations")
 
+selected_date = st.date_input("📅 Select a Game Date", datetime.today())
+game_list = get_games_by_date(selected_date)
+selected_game = st.selectbox("🎮 Choose a Game", game_list)
+
+player_name = st.text_input("🏀 Enter NBA Player Name")
+
+risk_level_filter = st.selectbox(
+    "⚠️ Select Risk Level",
+    ["All", "🔵 Very Safe", "🟢 Safe", "🟡 Moderate Risk", "🟠 High Risk", "🔴 Very High Risk"]
+)
+
+if st.button("🔍 Fetch Player Info"):
+    player_data = fetch_player_metadata(player_name)
+    st.write(player_data)
+
+if st.button("📊 Fetch Betting Odds"):
+    odds_data = fetch_betting_odds(selected_game)
+    st.write(odds_data)
+
+if st.button("⚠️ Fetch Injury Updates (Nitter)"):
+    injuries = fetch_injury_updates()
+    st.write(injuries)
+
+if st.button("🛑 Fetch First Basket Trends"):
+    first_basket_data = fetch_first_basket_data()
+    st.write(first_basket_data)
