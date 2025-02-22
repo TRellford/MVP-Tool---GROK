@@ -1,6 +1,8 @@
 import streamlit as st
 import datetime
 import matplotlib.pyplot as plt
+import pandas as pd
+
 from utils import (
     get_games_by_date, fetch_player_data, fetch_best_props, 
     fetch_game_predictions, fetch_sgp_builder, fetch_sharp_money_trends
