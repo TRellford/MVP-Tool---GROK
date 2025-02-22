@@ -6,10 +6,9 @@ import streamlit as st
 from nba_api.stats.endpoints import playergamelog, leaguedashteamstats, scoreboardv2
 from nba_api.stats.static import players
 
-# --- Cache Game Fetching ---
 @st.cache_data(ttl=3600)
 def get_games_by_date(target_date):
-    """Fetch NBA games using Scoreboard API and display team names & game times."""
+    """Fetch NBA games using Scoreboard API and display 'Away Team at Home Team'."""
     formatted_date = target_date.strftime("%Y-%m-%d")
     try:
         scoreboard = scoreboardv2.ScoreboardV2(game_date=formatted_date)
@@ -18,11 +17,12 @@ def get_games_by_date(target_date):
         if games_df.empty:
             return ["No games available"]
 
-        game_list = [f"{row['HOME_TEAM_NAME']} vs {row['VISITOR_TEAM_NAME']} - {row['GAME_STATUS_TEXT']}" for _, row in games_df.iterrows()]
+        game_list = [f"{row['VISITOR_TEAM_NAME']} at {row['HOME_TEAM_NAME']}" for _, row in games_df.iterrows()]
         return list(set(game_list))  # Remove duplicates
 
     except Exception as e:
         return [f"Error fetching games: {str(e)}"]
+
 
 # --- Fetch Player Stats ---
 @st.cache_data(ttl=600)
