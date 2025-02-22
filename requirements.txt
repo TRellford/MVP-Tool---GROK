@@ -1,6 +1,6 @@
-streamlit==1.25.0
-requests==2.28.1
-matplotlib==3.7.1
-pandas==1.5.3
-beautifulsoup4==4.11.1
-nba-api==1.2.0
+streamlit
+requests
+matplotlib==3.5.3
+pandas
+beautifulsoup4
+nba-api
