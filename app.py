@@ -31,7 +31,7 @@ if menu_option == "Player Search":
             st.warning("Please enter a player name.")
         else:
             stats_df = fetch_player_data(player_name, trend_length)
-            
+
             if "error" in stats_df:
                 st.error(stats_df["error"])
             else:
@@ -39,50 +39,48 @@ if menu_option == "Player Search":
                 
                 if "All" in selected_props:
                     selected_props = ["Points", "Rebounds", "Assists", "3PT Made", "Blocks", "Steals"]
-                
 
+                # 📊 Display Table of Averages
+                st.subheader("📊 Average Stats Over Selected Games")
+                prop_averages = {}
 
-# Convert Date Format for Readability
-stats_df["Game Date"] = pd.to_datetime(stats_df["Game Date"]).dt.strftime("%b %d")
+                for prop in selected_props:
+                    if prop in stats_df.columns:
+                        prop_averages[prop] = {
+                            "Last 5 Games": round(stats_df[prop].head(5).mean(), 1),
+                            "Last 10 Games": round(stats_df[prop].head(10).mean(), 1),
+                            "Last 15 Games": round(stats_df[prop].head(15).mean(), 1)
+                        }
 
-# 📊 Table of Averages for Selected Props
-st.subheader("📊 Average Stats Over Selected Games")
+                # Convert to DataFrame & Display
+                if prop_averages:
+                    avg_df = pd.DataFrame(prop_averages).T
+                    st.dataframe(avg_df.style.format("{:.1f}"))
 
-# Create a dictionary to store averages for each prop
-prop_averages = {}
+                # 📊 Generate Graphs for Each Selected Prop
+                import matplotlib.pyplot as plt
 
-for prop in selected_props:
-    if prop in stats_df.columns:
-        prop_averages[prop] = {
-            "Last 5 Games": round(stats_df[prop].head(5).mean(), 1),
-            "Last 10 Games": round(stats_df[prop].head(10).mean(), 1),
-            "Last 15 Games": round(stats_df[prop].head(15).mean(), 1)
-        }
+                # Convert Date Format for Readability
+                stats_df["Game Date"] = pd.to_datetime(stats_df["Game Date"]).dt.strftime("%b %d")
 
-# Convert Dictionary to a DataFrame for Display
-if prop_averages:
-    avg_df = pd.DataFrame(prop_averages).T  # Transpose for better layout
-    st.dataframe(avg_df.style.format("{:.1f}"))
-
-# 📊 Generate Graphs for Each Selected Prop
-for prop in selected_props:
-    if prop in stats_df.columns:
-        st.subheader(f"📊 {prop} - Last {trend_length} Games")
-        
-        # Create a Matplotlib Figure for Better Styling
-        fig, ax = plt.subplots(figsize=(8, 4))  # Adjust size for better visibility
-        ax.bar(stats_df["Game Date"], stats_df[prop], color="royalblue", alpha=0.8)  # Blue bars for clarity
-        
-        # Improve Label Visibility
-        ax.set_xlabel("Game Date", fontsize=12)
-        ax.set_ylabel(prop, fontsize=12)
-        ax.set_title(f"{prop} Over Last {trend_length} Games", fontsize=14, fontweight="bold")
-        
-        # Rotate X-Axis Labels If Needed
-        ax.set_xticklabels(stats_df["Game Date"], rotation=30, ha="right", fontsize=10)
-        
-        # Display Graph
-        st.pyplot(fig)
+                for prop in selected_props:
+                    if prop in stats_df.columns:
+                        st.subheader(f"📊 {prop} - Last {trend_length} Games")
+                        
+                        # Create a Matplotlib Figure for Better Styling
+                        fig, ax = plt.subplots(figsize=(8, 4))
+                        ax.bar(stats_df["Game Date"], stats_df[prop], color="royalblue", alpha=0.8)
+                        
+                        # Improve Label Visibility
+                        ax.set_xlabel("Game Date", fontsize=12)
+                        ax.set_ylabel(prop, fontsize=12)
+                        ax.set_title(f"{prop} Over Last {trend_length} Games", fontsize=14, fontweight="bold")
+                        
+                        # Rotate X-Axis Labels If Needed
+                        ax.set_xticklabels(stats_df["Game Date"], rotation=30, ha="right", fontsize=10)
+                        
+                        # Display Graph
+                        st.pyplot(fig)
 
 
 # --- Section 2: SGP (Same Game Parlay - Only 1 Game Allowed) ---
