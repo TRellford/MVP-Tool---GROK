@@ -6,16 +6,24 @@ from bs4 import BeautifulSoup
 from nba_api.stats.endpoints import playergamelog, leaguedashteamstats
 from nba_api.stats.static import players
 from nba_api.stats.endpoints import commonplayerinfo
+import streamlit as st
 
 # API Keys
 ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 
-# --- Fetch Player Stats from NBA API ---
-def fetch_player_data(player_name, trend_length):
-    """ Fetches real-time player stats from NBA API for visualization """
+# --- Cache Player List to Reduce API Calls ---
+@st.cache_data(ttl=3600)  # Cache for 1 hour
+def get_all_players():
+    """Fetches and caches the list of all NBA players."""
+    return players.get_players()
 
-    # Get Player ID
-    player_dict = players.get_players()
+# --- Fetch Player Stats (With Optimized Calls) ---
+@st.cache_data(ttl=600)  # Cache for 10 minutes to reduce API load
+def fetch_player_data(player_name, trend_length):
+    """ Fetches real-time player stats from NBA API with caching """
+
+    # Get Cached Player List
+    player_dict = get_all_players()
     player = next((p for p in player_dict if p["full_name"].lower() == player_name.lower()), None)
 
     if not player:
@@ -54,42 +62,11 @@ def fetch_odds(entity, prop_type):
     
     return response.json()
 
-# --- AI-Based Betting Edge Detector ---
-def detect_betting_edge(ai_predicted_line, sportsbook_odds):
-    """ Compares AI-predicted lines with sportsbook odds to find value bets """
-    edge_found = False
-    risk_level = "Unknown"
-
-    # Extract odds and AI predictions
-    odds = sportsbook_odds.get("odds", -110)  # Default to -110 if missing
-    ai_line = ai_predicted_line.get("prediction", "N/A")
-
-    # Detect Edge - AI vs. Sportsbook
-    if abs(ai_predicted_line["adjusted_spread"] - sportsbook_odds["spread"]) > 1.5:
-        edge_found = True
-
-    # Assign risk levels based on odds
-    if -300 <= odds <= -200:
-        risk_level = "🟢 Safe"
-    elif -180 <= odds <= +100:
-        risk_level = "🟡 Moderate"
-    elif +101 <= odds <= +250:
-        risk_level = "🟠 High Risk"
-    elif odds >= +251:
-        risk_level = "🔴 Very High Risk"
-
-    return {
-        "betting_edge_found": edge_found,
-        "ai_predicted_line": ai_line,
-        "sportsbook_odds": odds,
-        "risk_level": risk_level
-    }
-
-# --- Auto-Fetch Best Player Props Based on Matchups ---
+# --- Optimized Auto-Fetch Best Player Props ---
 def fetch_best_props(player_name, trend_length):
     """ Auto-selects best player props based on stats trends & defensive matchups """
 
-    # Get player stats
+    # Use Cached Stats Instead of Refetching
     player_stats = fetch_player_data(player_name, trend_length)
 
     if "error" in player_stats:
