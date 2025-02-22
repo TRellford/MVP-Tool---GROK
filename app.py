@@ -1,140 +1,181 @@
 import streamlit as st
 import requests
-import json
-import tweepy
-from nba_api.stats.endpoints import playergamelog, commonplayerinfo
-from datetime import datetime, timedelta
+import snscrape.modules.twitter as sntwitter
+from nba_api.stats.endpoints import commonplayerinfo, playergamelogs
+from nba_api.stats.static import players, teams
 from scipy.stats import norm
+from datetime import datetime
+import json
 
-# Load API keys from Streamlit secrets
+# 🔑 API KEYS (User needs to add their BallDontLie & Odds API keys)
 try:
-    BALL_DONT_LIE_API_KEY = st.secrets["ball_dont_lie_api_key"]
-    TWITTER_BEARER_TOKEN = st.secrets["twitter_bearer_token"]
+    BALLDONTLIE_API_KEY = st.secrets["balldontlie_api_key"]
+    ODDS_API_KEY = st.secrets["odds_api_key"]
 except KeyError:
-    st.error("API keys not found in Streamlit secrets. Ensure they are set in `.streamlit/secrets.toml`.")
+    st.error("API key(s) missing. Add them to Streamlit secrets.")
     st.stop()
 
-# API Endpoints
+# 🌐 API Base URLs
 BALL_DONT_LIE_BASE_URL = "https://www.balldontlie.io/api/v1"
-NBA_API_BASE_URL = "https://stats.nba.com/stats"
+ODDS_API_BASE_URL = "https://api.the-odds-api.com/v4/sports/basketball_nba"
 
-# Function to get NBA player stats (Last 5, 10, 15 games)
-def get_nba_player_stats(player_name, trend_period=5):
-    """Fetch player game logs from NBA API."""
-    player_id = get_nba_player_id(player_name)
-    if not player_id:
-        st.error(f"Could not find player ID for {player_name}.")
+# ✅ Scrape Latest Tweets from @Underdog__NBA for Injury Updates
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def scrape_underdog_nba_tweets():
+    """Scrape @Underdog__NBA latest tweets for injury & lineup updates."""
+    tweets = []
+    query = "from:Underdog__NBA"
+    for tweet in sntwitter.TwitterSearchScraper(query).get_items():
+        tweets.append(tweet.content)
+        if len(tweets) == 10:  # Limit to last 10 tweets
+            break
+    return tweets
+
+# ✅ Get NBA Player Stats (Last 5, 10, 15 Games) from NBA API
+@st.cache_data(ttl=3600)
+def get_nba_player_stats(player_name, num_games=5):
+    """Fetch a player's last 5, 10, or 15 game logs from NBA API."""
+    all_players = players.get_players()
+    player = next((p for p in all_players if p["full_name"].lower() == player_name.lower()), None)
+    
+    if not player:
         return None
 
-    game_log = playergamelog.PlayerGameLog(player_id=player_id, season="2023-24", season_type_all_star="Regular Season").get_dict()
-    stats = game_log["resultSets"][0]["rowSet"][:trend_period]
+    player_id = player["id"]
+    gamelogs = playergamelogs.PlayerGameLogs(player_id=player_id, season_nullable="2023-24", per_mode_simple="PerGame").get_dict()
+    
+    if not gamelogs or "resultSets" not in gamelogs or len(gamelogs["resultSets"]) == 0:
+        return None
 
-    return [
-        {
-            "date": stat[3],
-            "points": stat[26],
-            "rebounds": stat[20],
-            "assists": stat[21],
-            "three_pointers_made": stat[25]
-        }
-        for stat in stats
-    ]
+    logs = gamelogs["resultSets"][0]["rowSet"][:num_games]
+    return logs
 
-# Function to fetch player ID from NBA API
-def get_nba_player_id(player_name):
-    """Retrieve NBA player ID for API queries."""
-    player_info = commonplayerinfo.CommonPlayerInfo().get_dict()
-    for player in player_info["resultSets"][0]["rowSet"]:
-        if player_name.lower() in player[3].lower():
-            return player[0]
-    return None
-
-# Function to fetch player data from BallDontLie API
-def get_player_info(player_name):
+# ✅ Find Player's Team and Upcoming Games
+@st.cache_data(ttl=3600)
+def find_player_games(player_name):
+    """Find upcoming games for a player based on their team."""
     url = f"{BALL_DONT_LIE_BASE_URL}/players?search={player_name}"
     response = requests.get(url)
-    if response.status_code == 200:
+
+    if response.status_code != 200 or "data" not in response.json():
+        return []
+
+    player_data = response.json()["data"]
+    if not player_data:
+        return []
+
+    player_info = player_data[0]
+    player_team = player_info.get("team", {}).get("full_name", "Unknown Team")
+
+    # Fetch NBA schedule
+    games_url = f"{BALL_DONT_LIE_BASE_URL}/games"
+    games_response = requests.get(games_url)
+
+    if games_response.status_code != 200:
+        return []
+
+    games = games_response.json().get("data", [])
+
+    # Filter games where the player's team is playing
+    player_games = [
+        {
+            "id": game["id"],
+            "home_team": game["home_team"]["full_name"],
+            "away_team": game["visitor_team"]["full_name"],
+            "date": game["date"]
+        }
+        for game in games
+        if player_team in [game["home_team"]["full_name"], game["visitor_team"]["full_name"]]
+    ]
+
+    return player_games
+
+# ✅ Get Player Prop Odds from The Odds API
+def get_player_prop_odds(game_id, prop):
+    """Fetch player prop odds from The Odds API."""
+    url = f"{ODDS_API_BASE_URL}/events/{game_id}/odds?apiKey={ODDS_API_KEY}&regions=us&markets={prop}&oddsFormat=american"
+
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
         data = response.json()
-        if "data" in data and data["data"]:
-            return data["data"][0]
-    return None
+        
+        for market in data.get("bookmakers", [{}])[0].get("markets", []):
+            if market["key"] == prop:
+                return market["outcomes"]
+        return None
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error fetching prop odds: {e}")
+        return None
 
-# Function to monitor Underdog NBA Twitter for real-time injuries
-def monitor_underdog_twitter():
-    """Fetch the latest tweets from Underdog NBA for injury updates."""
-    client = tweepy.Client(bearer_token=TWITTER_BEARER_TOKEN)
-    query = "from:Underdog__NBA -is:retweet"
-    tweets = client.search_recent_tweets(query=query, max_results=5)
-    
-    latest_updates = []
-    if tweets.data:
-        for tweet in tweets.data:
-            latest_updates.append(tweet.text)
-    
-    return latest_updates
-
-# Function to predict player props
-def predict_player_prop(player_name, prop, prop_line, trend_period=5):
-    """Predict player prop outcomes using NBA API stats."""
-    stats = get_nba_player_stats(player_name, trend_period)
+# ✅ Predict Player Prop Based on Stats
+def predict_player_prop(player_name, prop, prop_line, game, num_games=5):
+    """Predict player prop outcome using last N games."""
+    stats = get_nba_player_stats(player_name, num_games)
     if not stats:
         return None
 
-    stat_key = {
-        "points": "points",
-        "rebounds": "rebounds",
-        "assists": "assists",
-        "three_pointers_made": "three_pointers_made"
-    }.get(prop)
+    stat_key = prop.split("_")[1]
+    historical_values = [stat.get(stat_key, 0) for stat in stats]
 
-    if not stat_key:
-        st.error(f"Invalid prop category: {prop}")
-        return None
-
-    historical_values = [stat[stat_key] for stat in stats]
     if not historical_values:
         return None
 
-    avg_stat = sum(historical_values) / len(historical_values)
-    std_dev = (sum((x - avg_stat) ** 2 for x in historical_values) / len(historical_values)) ** 0.5 if len(historical_values) > 1 else 0
+    avg = sum(historical_values) / len(historical_values)
+    std_dev = (sum((x - avg) ** 2 for x in historical_values) / len(historical_values)) ** 0.5 if len(historical_values) > 1 else 0
+    predicted_mean = avg * 1.05  # Placeholder for opponent adjustment
 
-    predicted_mean = avg_stat * 1.05  # Adjusted projection
     prob_over = 1 - norm.cdf(prop_line, loc=predicted_mean, scale=std_dev)
     prediction = "Over" if prob_over > 0.5 else "Under"
     confidence = prob_over * 100 if prob_over > 0.5 else (1 - prob_over) * 100
 
+    odds_data = get_player_prop_odds(game["id"], prop)
+    odds = "-110"
+    if odds_data:
+        for outcome in odds_data:
+            if outcome["name"] == player_name and float(outcome["point"]) == prop_line:
+                odds = str(outcome["price"])
+                break
+
     return {
         "prediction": prediction,
         "confidence": confidence,
+        "odds": odds,
         "prop_line": prop_line,
-        "trend_period": trend_period
+        "insight": f"Based on last {num_games} games."
     }
 
-# Streamlit UI
-st.title("NBA Betting Predictor 📊🔥")
+# ✅ Streamlit UI
+st.title("🏀 Initial MVP Tool - NBA Betting Insights")
 
-player_name = st.text_input("Enter Player Name:")
-prop_type = st.selectbox("Select Prop Type", ["points", "rebounds", "assists", "three_pointers_made"])
+# 🚀 Injury & Lineup Updates from @Underdog__NBA
+st.subheader("🔴 Real-Time Injury & Lineup Updates")
+tweets = scrape_underdog_nba_tweets()
+for tweet in tweets:
+    st.write(f"📝 {tweet}")
+
+# 📊 Player Prop Predictions
+st.subheader("📈 Player Prop Predictions")
+player_name = st.text_input("Enter Player Name")
+prop_type = st.selectbox("Select Prop", ["points", "rebounds", "assists"])
 prop_line = st.number_input("Set Prop Line", min_value=0.0, step=0.5)
-trend_period = st.selectbox("Trend Period", [5, 10, 15])
 
 if st.button("Get Prediction"):
-    prediction = predict_player_prop(player_name, prop_type, prop_line, trend_period)
-    
-    if prediction:
-        st.subheader(f"Prediction: {prediction['prediction']}")
-        st.write(f"Confidence: {prediction['confidence']:.2f}%")
-        st.write(f"Using Last {prediction['trend_period']} Games")
-
+    games = find_player_games(player_name)
+    if not games:
+        st.error(f"No upcoming games found for {player_name}.")
     else:
-        st.error("Could not generate a prediction. Please check player name and try again.")
+        game = games[0]  # Assume next game
+        prediction = predict_player_prop(player_name, prop_type, prop_line, game)
+        if prediction:
+            st.write(f"📊 Prediction: **{prediction['prediction']}**")
+            st.write(f"🔢 Confidence: **{prediction['confidence']:.2f}%**")
+            st.write(f"💰 Odds: **{prediction['odds']}**")
+            st.write(f"📌 Insight: {prediction['insight']}")
+        else:
+            st.error("Failed to generate prediction.")
 
-# Display latest injury updates from Underdog NBA
-st.subheader("🛑 Injury Updates from Underdog NBA:")
-injury_updates = monitor_underdog_twitter()
-if injury_updates:
-    for update in injury_updates:
-        st.write(f"🔹 {update}")
-else:
-    st.write("No recent injury updates found.")
-
+# 🔄 Update Button
+if st.button("🔄 Refresh Injury Reports"):
+    scrape_underdog_nba_tweets()
+    st.experimental_rerun()
