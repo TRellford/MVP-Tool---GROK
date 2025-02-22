@@ -1,52 +1,45 @@
 import streamlit as st
-import matplotlib.pyplot as plt
-from utils import fetch_player_data, fetch_best_props
+import datetime
+import pandas as pd
+from nba_api.stats.endpoints import leaguegamefinder
 
 st.set_page_config(page_title="NBA Betting AI", layout="wide")
 
-st.title("📈 AI-Powered NBA Betting Predictions")
+# --- Function to Fetch NBA Games ---
+def get_games_by_date(target_date):
+    """Fetches NBA games scheduled for a given date."""
+    game_finder = leaguegamefinder.LeagueGameFinder(season_nullable="2023-24")
+    games = game_finder.get_data_frames()[0]
 
-# --- Player Trend Analysis ---
-st.header("🔍 Player Performance Insights")
+    # Convert game date format
+    games["GAME_DATE"] = pd.to_datetime(games["GAME_DATE"])
 
-player_name = st.text_input("Enter Player Name (e.g., Kevin Durant)")
-trend_length = st.radio("Select Trend Length", [5, 10, 15])
+    # Filter games by the target date
+    filtered_games = games[games["GAME_DATE"].dt.date == target_date.date()]
 
-if st.button("Generate Insights"):
-    if not player_name:
-        st.warning("Please enter a player name.")
-    else:
-        stats_df = fetch_player_data(player_name, trend_length)
+    # Extract team matchups
+    game_list = [f"{row['TEAM_ABBREVIATION']} vs {row['MATCHUP'].split()[-1]}" for _, row in filtered_games.iterrows()]
+    
+    return game_list if game_list else ["No games available"]
 
-        if "error" in stats_df:
-            st.error(stats_df["error"])
-        else:
-            fig, ax = plt.subplots(figsize=(10, 5))
+# --- Get Today's & Tomorrow's Dates ---
+today = datetime.datetime.today()
+tomorrow = today + datetime.timedelta(days=1)
 
-            ax.plot(stats_df["Game Date"], stats_df["Points"], marker="o", label="Points")
-            ax.plot(stats_df["Game Date"], stats_df["Rebounds"], marker="s", label="Rebounds")
-            ax.plot(stats_df["Game Date"], stats_df["Assists"], marker="^", label="Assists")
+# --- Fetch Games for Today & Tomorrow ---
+todays_games = get_games_by_date(today)
+tomorrows_games = get_games_by_date(tomorrow)
 
-            ax.set_xlabel("Game Date")
-            ax.set_ylabel("Stats")
-            ax.set_title(f"{player_name} - Last {trend_length} Games")
-            ax.legend()
-            plt.xticks(rotation=45)
+# --- UI ---
+st.title("🏀 NBA Betting AI - Game Selection")
 
-            st.pyplot(fig)
+# Radio button for date selection
+selected_date = st.radio("Choose Game Date:", ["Today's Games", "Tomorrow's Games"])
 
-# --- Auto-Fetch Best Player Props ---
-st.header("📊 Best Player Prop Bets Based on Matchups")
+# Update dropdown based on the selected date
+if selected_date == "Today's Games":
+    game_selection = st.selectbox("Select a Game:", todays_games)
+else:
+    game_selection = st.selectbox("Select a Game:", tomorrows_games)
 
-if st.button("Find Best Player Prop"):
-    if not player_name:
-        st.warning("Please enter a player name.")
-    else:
-        best_prop = fetch_best_props(player_name, trend_length)
-
-        if "error" in best_prop:
-            st.error(best_prop["error"])
-        else:
-            st.success(f"🔥 Best Bet for {player_name}: **{best_prop['best_prop']}**")
-            st.write(f"📊 **Average {best_prop['best_prop']}:** {best_prop['average_stat']} per game")
-            st.write(f"🚨 **Weakest Defensive Teams Against {best_prop['best_prop']}:** {', '.join(best_prop['weak_defensive_teams'])}")
+st.success(f"📅 You selected: {game_selection}")
