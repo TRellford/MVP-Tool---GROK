@@ -1,156 +1,140 @@
 import streamlit as st
-import utils
 import requests
+import json
+import tweepy
+from nba_api.stats.endpoints import playergamelog, commonplayerinfo
+from datetime import datetime, timedelta
+from scipy.stats import norm
 
-st.title("NBA Betting Prediction System")
+# Load API keys from Streamlit secrets
+try:
+    BALL_DONT_LIE_API_KEY = st.secrets["ball_dont_lie_api_key"]
+    TWITTER_BEARER_TOKEN = st.secrets["twitter_bearer_token"]
+except KeyError:
+    st.error("API keys not found in Streamlit secrets. Ensure they are set in `.streamlit/secrets.toml`.")
+    st.stop()
 
+# API Endpoints
 BALL_DONT_LIE_BASE_URL = "https://www.balldontlie.io/api/v1"
+NBA_API_BASE_URL = "https://stats.nba.com/stats"
 
-player_name = st.text_input("Enter player name to test API")
+# Function to get NBA player stats (Last 5, 10, 15 games)
+def get_nba_player_stats(player_name, trend_period=5):
+    """Fetch player game logs from NBA API."""
+    player_id = get_nba_player_id(player_name)
+    if not player_id:
+        st.error(f"Could not find player ID for {player_name}.")
+        return None
 
-if st.button("Test API"):
+    game_log = playergamelog.PlayerGameLog(player_id=player_id, season="2023-24", season_type_all_star="Regular Season").get_dict()
+    stats = game_log["resultSets"][0]["rowSet"][:trend_period]
+
+    return [
+        {
+            "date": stat[3],
+            "points": stat[26],
+            "rebounds": stat[20],
+            "assists": stat[21],
+            "three_pointers_made": stat[25]
+        }
+        for stat in stats
+    ]
+
+# Function to fetch player ID from NBA API
+def get_nba_player_id(player_name):
+    """Retrieve NBA player ID for API queries."""
+    player_info = commonplayerinfo.CommonPlayerInfo().get_dict()
+    for player in player_info["resultSets"][0]["rowSet"]:
+        if player_name.lower() in player[3].lower():
+            return player[0]
+    return None
+
+# Function to fetch player data from BallDontLie API
+def get_player_info(player_name):
     url = f"{BALL_DONT_LIE_BASE_URL}/players?search={player_name}"
     response = requests.get(url)
-    
-    st.write(f"Status Code: {response.status_code}")
-    st.write("Raw Response:")
-    st.code(response.text)
-
-    try:
+    if response.status_code == 200:
         data = response.json()
-        st.write("JSON Response:")
-        st.json(data)
-    except:
-        st.error("Response is not valid JSON!")
+        if "data" in data and data["data"]:
+            return data["data"][0]
+    return None
 
+# Function to monitor Underdog NBA Twitter for real-time injuries
+def monitor_underdog_twitter():
+    """Fetch the latest tweets from Underdog NBA for injury updates."""
+    client = tweepy.Client(bearer_token=TWITTER_BEARER_TOKEN)
+    query = "from:Underdog__NBA -is:retweet"
+    tweets = client.search_recent_tweets(query=query, max_results=5)
+    
+    latest_updates = []
+    if tweets.data:
+        for tweet in tweets.data:
+            latest_updates.append(tweet.text)
+    
+    return latest_updates
 
-def player_search():
-    st.subheader("Player Prop Search")
-    player_name = st.text_input("Enter player name (e.g., LeBron James)")
-    if not player_name:
-        return
+# Function to predict player props
+def predict_player_prop(player_name, prop, prop_line, trend_period=5):
+    """Predict player prop outcomes using NBA API stats."""
+    stats = get_nba_player_stats(player_name, trend_period)
+    if not stats:
+        return None
 
-    player_games = utils.find_player_games(player_name)
-    if not player_games:
-        st.write("No upcoming games found for this player.")
-        return
+    stat_key = {
+        "points": "points",
+        "rebounds": "rebounds",
+        "assists": "assists",
+        "three_pointers_made": "three_pointers_made"
+    }.get(prop)
 
-    st.write(f"Upcoming games for {player_name}:")
-    game_options = [f"{game['home_team']} vs {game['away_team']} ({game['commence_time']})" for game in player_games]
-    selected_game_str = st.selectbox("Select a game", game_options)
-    game_idx = game_options.index(selected_game_str)
-    selected_game = player_games[game_idx]
+    if not stat_key:
+        st.error(f"Invalid prop category: {prop}")
+        return None
 
-    prop_options = {'Points': 'player_points', 'Assists': 'player_assists', 'Rebounds': 'player_rebounds', '3PT Made': 'player_threes'}
-    prop_selection = st.selectbox("Select prop", ["All"] + list(prop_options.keys()))
-    confidence_filter = st.number_input("Confidence score filter (e.g., 80 for 80%+)", min_value=0.0, max_value=100.0, value=80.0)
-    trend_period = st.selectbox("Trend period (games)", [5, 10, 15])
+    historical_values = [stat[stat_key] for stat in stats]
+    if not historical_values:
+        return None
 
-    if st.button("Predict"):
-        props = prop_options.values() if prop_selection == 'All' else [prop_options[prop_selection]]
-        for prop in props:
-            prop_line = st.number_input(f"Enter prop line for {prop.split('_')[1]} (e.g., 25.5)", value=25.5, key=f"{player_name}_{prop}")
-            prediction = utils.predict_player_prop(player_name, prop, prop_line, selected_game, trend_period)
-            if prediction and "confidence" in prediction and prediction['confidence'] >= confidence_filter:
-                st.write(f"**Player:** {player_name}")
-                st.write(f"**Prediction:** {prediction['prediction']} {prop_line} ({prediction['odds']})")
-                st.write(f"**Confidence Score:** {prediction['confidence']:.2f}%")
-                if prediction['edge'] > 0:
-                    st.write(f"**Edge Detector:** 🔥 {prediction['edge']:.1f}-point edge detected.")
-                st.write(f"**Risk Level:** {prediction['risk_level']}")
-            else:
-                st.write(f"No prediction meets confidence filter for {prop}.")
+    avg_stat = sum(historical_values) / len(historical_values)
+    std_dev = (sum((x - avg_stat) ** 2 for x in historical_values) / len(historical_values)) ** 0.5 if len(historical_values) > 1 else 0
 
-def multi_game_prop_selection():
-    st.subheader("Multi-Game Prop Selection")
+    predicted_mean = avg_stat * 1.05  # Adjusted projection
+    prob_over = 1 - norm.cdf(prop_line, loc=predicted_mean, scale=std_dev)
+    prediction = "Over" if prob_over > 0.5 else "Under"
+    confidence = prob_over * 100 if prob_over > 0.5 else (1 - prob_over) * 100
 
-    games_today = utils.get_games_by_date(st.session_state.get("selected_date", "today"))
-    if not games_today:
-        st.write("No games found for today.")
-        return
+    return {
+        "prediction": prediction,
+        "confidence": confidence,
+        "prop_line": prop_line,
+        "trend_period": trend_period
+    }
 
-    game_options = [f"{game['home_team']} vs {game['away_team']} ({game['commence_time']})" for game in games_today]
-    selected_games = st.multiselect("Select games", game_options)
+# Streamlit UI
+st.title("NBA Betting Predictor 📊🔥")
 
-    prop_options = {'Points': 'player_points', 'Assists': 'player_assists', 'Rebounds': 'player_rebounds', '3PT Made': 'player_threes'}
-    selected_props = st.multiselect("Select props", list(prop_options.keys()))
+player_name = st.text_input("Enter Player Name:")
+prop_type = st.selectbox("Select Prop Type", ["points", "rebounds", "assists", "three_pointers_made"])
+prop_line = st.number_input("Set Prop Line", min_value=0.0, step=0.5)
+trend_period = st.selectbox("Trend Period", [5, 10, 15])
 
-    confidence_filter = st.number_input("Confidence score filter (e.g., 80 for 80%+)", min_value=0.0, max_value=100.0, value=80.0)
-    trend_period = st.selectbox("Trend period (games)", [5, 10, 15])
+if st.button("Get Prediction"):
+    prediction = predict_player_prop(player_name, prop_type, prop_line, trend_period)
+    
+    if prediction:
+        st.subheader(f"Prediction: {prediction['prediction']}")
+        st.write(f"Confidence: {prediction['confidence']:.2f}%")
+        st.write(f"Using Last {prediction['trend_period']} Games")
 
-    if st.button("Predict"):
-        for game_option in selected_games:
-            game_idx = game_options.index(game_option)
-            game = games_today[game_idx]
-            st.write(f"### Predictions for {game['home_team']} vs {game['away_team']}")
+    else:
+        st.error("Could not generate a prediction. Please check player name and try again.")
 
-            for prop in selected_props:
-                st.write(f"#### {prop}")
-                player_names = utils.get_players_from_game(game['id'])  # Fetch players from the game
-                for player in player_names:
-                    prop_key = prop_options[prop]
-                    prop_line = st.number_input(f"Enter line for {player}'s {prop} (e.g., 25.5)", value=25.5, key=f"{game['id']}_{player}_{prop}")
+# Display latest injury updates from Underdog NBA
+st.subheader("🛑 Injury Updates from Underdog NBA:")
+injury_updates = monitor_underdog_twitter()
+if injury_updates:
+    for update in injury_updates:
+        st.write(f"🔹 {update}")
+else:
+    st.write("No recent injury updates found.")
 
-                    prediction = utils.predict_player_prop(player, prop_key, prop_line, game, trend_period)
-                    if prediction and "confidence" in prediction and prediction['confidence'] >= confidence_filter:
-                        st.write(f"**Player:** {player}")
-                        st.write(f"**Prediction:** {prediction['prediction']} {prop_line} ({prediction['odds']})")
-                        st.write(f"**Confidence Score:** {prediction['confidence']:.2f}%")
-                        if prediction['edge'] > 0:
-                            st.write(f"**Edge Detector:** 🔥 {prediction['edge']:.1f}-point edge detected.")
-                        st.write(f"**Risk Level:** {prediction['risk_level']}")
-                    else:
-                        st.write(f"No prediction meets confidence filter for {player} - {prop}.")
-
-def game_predictions():
-    st.subheader("Game Predictions")
-
-    games_today = utils.get_games_by_date(st.session_state.get("selected_date", "today"))
-    if not games_today:
-        st.write("No games found for today.")
-        return
-
-    game_options = [f"{game['home_team']} vs {game['away_team']} ({game['commence_time']})" for game in games_today]
-    selected_game_str = st.selectbox("Select a game", game_options)
-
-    game_idx = game_options.index(selected_game_str)
-    selected_game = games_today[game_idx]
-
-    if st.button("Predict"):
-        predictions = utils.predict_game_outcome(selected_game)
-
-        if predictions:
-            st.write(f"### Predictions for {selected_game['home_team']} vs {selected_game['away_team']}")
-            
-            # Moneyline Prediction
-            moneyline = predictions["moneyline"]
-            st.write(f"#### Moneyline: **{moneyline['team']}** ({moneyline['odds']})")
-            st.write(f"**Win Probability:** {moneyline['win_prob']:.2f}%")
-            if moneyline['edge'] > 0:
-                st.write(f"**Betting Edge:** 🔥 {moneyline['edge']:.2f} edge detected.")
-
-            # Spread Prediction
-            spread = predictions["spread"]
-            st.write(f"#### Spread: **{spread['line']}** ({spread['odds']})")
-            st.write(f"**Edge:** {spread['edge']:.2f}")
-
-            # Over/Under Prediction
-            over_under = predictions["over_under"]
-            st.write(f"#### Over/Under: **{over_under['prediction']} {over_under['line']}** ({over_under['odds']})")
-            st.write(f"**Edge:** {over_under['edge']:.2f}")
-
-        else:
-            st.write("No predictions available for this game.")
-
-def main():
-    menu = ["Player Search", "Multi-Game Prop Selection", "Game Predictions"]
-    choice = st.sidebar.selectbox("Menu", menu)
-
-    if choice == "Player Search":
-        player_search()
-    elif choice == "Multi-Game Prop Selection":
-        multi_game_prop_selection()
-    elif choice == "Game Predictions":
-        game_predictions()
-
-main()
